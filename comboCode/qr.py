@@ -4,7 +4,7 @@ import sys
 import os
 import ast
 
-DIFF_CONST = 0.03
+DIFF_CONST = 0.05
 retImgSaved = False
 
 current_rvec = None
@@ -13,15 +13,16 @@ saved_rvec = None
 saved_tvec = None
 #=========================================================================================================
 #Function to get the homeImage coords
-def getInitialPoints():
-    fname = input('Enter name of Base Image without extension\n>')
-    target_line_prefix = fname + ':'
+def getInitialPoints(imgName):
+    #fname = input('Enter name of Base Image without extension\n>')
+    target_line_prefix = imgName + ':'
+    #print(imgName)
     
     with open('savedImages/imgData/Data.txt', 'r') as file:
         lines = file.readlines()
         for line in lines:
             if line.startswith(target_line_prefix):
-                print('img data found!\n')
+                #print('img data found!\n')
                 data_str = line.split(':', 1)[1].strip()
                 try:
                     arrays = ast.literal_eval(data_str)
@@ -116,18 +117,18 @@ def saveImageNLoc( rvecSaved,tvecSaved, img):
     for path in os.listdir(dirPath):
         if os.path.isfile(os.path.join(dirPath, path)):
             count +=1
-            print('File count: ', count)
+            #print('File count: ', count)
 
     save_path0 = f'savedImages/images/guiSave{count}.png'
     cv.imwrite(save_path0, img)
     #count +=1
             
     with open('savedImages/imgData/Data.txt', 'a') as f:
-        f.write("img" + str(count) + ": " + str(savedDat) + "\n")
+        f.write("guiSave" + str(count) + ".png: " + str(savedDat) + "\n")
         print('DAT written to file')
                     
 #=========================================================================================================
-def process_frame(frame, cmtx, dist):
+def process_frame(frame, cmtx, dist, update_callback=None):
     global current_rvec, current_tvec
 
     qr = cv.QRCodeDetector()
@@ -145,6 +146,10 @@ def process_frame(frame, cmtx, dist):
             current_rvec = rvec
             current_tvec = tvec
 
+            # Call the update callback with the new coordinates
+            if update_callback is not None:
+                update_callback(tvec, rvec)
+
             for p, c in zip(axis_points[1:], [(255, 0, 0), (0, 255, 0), (0, 0, 255)]):
                     p = (int(p[0]), int(p[1]))
 
@@ -158,6 +163,29 @@ def process_frame(frame, cmtx, dist):
             # Add more processing as needed, such as drawing text or other markers
 
     return frame
+#=========================================================================================================
+
+def returnToLoc( main_frame):
+    global current_rvec, current_tvec, saved_rvec, saved_tvec
+    #saved_rvec, saved_tvec = getInitialPoints(selectedImg)
+    if saved_rvec is None or saved_tvec is None or current_rvec is None or current_tvec is None:
+        print("--MISSING A VALUE--")
+        return False
+    else:
+        print("\nSAVED rvec: ", saved_rvec, "\nSAVED tvec: ", saved_tvec)
+        print("\nCURR rvec: ", current_rvec, "\ncurrent tvec: ", current_tvec, "\n")
+
+    if (abs(saved_tvec[0] - current_tvec[0]) <= DIFF_CONST and abs(saved_tvec[1] - current_tvec[1]) <= DIFF_CONST and abs(saved_tvec[2] - current_tvec[2]) <= DIFF_CONST
+        and abs(saved_rvec[0] - current_rvec[0]) <= DIFF_CONST and abs(saved_rvec[1] - current_rvec[1]) <= DIFF_CONST and abs(saved_rvec[2] - current_rvec[2]) <= DIFF_CONST):
+        print("--MATCHED--")
+        main_frame.update_status(True)
+        return True
+    else:
+        print("--NOT MATCHED--")
+        main_frame.update_status(False)
+        return False
+
+
                     
 #=========================================================================================================
                     

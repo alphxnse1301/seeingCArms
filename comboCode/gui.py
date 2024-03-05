@@ -2,17 +2,20 @@ import wx
 import threading
 import cv2 as cv
 import qr
+import os
 
 #baseRvec = [0,0,0]
 #baseTvec = [0,0,0]
 
 class CameraThread(threading.Thread):
-    def __init__(self, input_source, cmtx, dist, frame_callback):
+    def __init__(self, input_source, cmtx, dist, frame_callback, update_callback, main_frame):
         super().__init__()
         self.input_source = input_source
         self.cmtx = cmtx
         self.dist = dist
         self.frame_callback = frame_callback
+        self.update_callback = update_callback
+        self.main_frame = main_frame  
         self.running = True
         self.current_frame = None
 
@@ -25,27 +28,38 @@ class CameraThread(threading.Thread):
             raise ValueError("Invalid input for video ")
 
         while self.running:
+            #print("Camera thread running...")
             ret, frame = cap.read()
             #if ret == False: break
             if ret:
-                processed_frame = qr.process_frame(frame, self.cmtx, self.dist)
+                processed_frame = qr.process_frame(frame, self.cmtx, self.dist, self.update_callback)
                 self.current_frame = frame
                 wx.CallAfter(self.frame_callback, processed_frame)
             else:
                 break
+        print("Camera thread loop exited.")
         cap.release()
 
     def stop(self):
+        print("Stopping camera thread...")
         self.running = False
 
 class CameraPanel(wx.Panel):
-    def __init__(self, parent, size=(800, 600)):
+    def __init__(self, parent, main_frame, size=(800, 600)):
         super().__init__(parent, size=size)
+        self.main_frame = main_frame  
         self.camera_bitmap = wx.StaticBitmap(self, size=size)
 
     def update_frame(self, frame):
         height, width = frame.shape[:2]
         frame = cv.cvtColor(frame, cv.COLOR_BGR2RGB)
+
+        if self.main_frame.return_mode_active:
+            selected_image = self.main_frame.image_selector.GetValue()
+            if selected_image:
+                if qr.returnToLoc( self.main_frame):  
+                    cv.rectangle(frame, (0, 0), (frame.shape[1], frame.shape[0]), (0, 255, 0), 10)
+
         bitmap = wx.Bitmap.FromBuffer(width, height, frame)
         self.camera_bitmap.SetBitmap(bitmap)
 
@@ -55,18 +69,20 @@ class HelloFrame(wx.Frame):
         self.SetTitle('QR Code Tracker')
 
         pnl = wx.Panel(self)
-
+        self.Bind(wx.EVT_CLOSE, self.on_close)
         # Main sizer for the entire panel
         main_sizer = wx.BoxSizer(wx.VERTICAL)
 
         # Camera Panel
-        self.camera_panel = CameraPanel(pnl, size=(800, 600))
+        self.camera_panel = CameraPanel(pnl, self, size=(800, 600))
         main_sizer.Add(self.camera_panel, 1, wx.EXPAND | wx.ALL, 5)
 
         # Buttons at the bottom of the screen
         button_sizer = wx.BoxSizer(wx.HORIZONTAL)
         self.save_button = wx.Button(pnl, label="Save")
         self.return_button = wx.ToggleButton(pnl, label="Return")
+
+        self.return_mode_active = False
 
         # Add buttons to the button sizer
         button_sizer.Add(self.save_button, 0, wx.EXPAND | wx.ALL, 5)
@@ -81,17 +97,36 @@ class HelloFrame(wx.Frame):
         # Start the camera thread
         cmtx, dist = qr.read_camera_parameters()
         input_source = self.ShowOptionDialog()
-        self.camera_thread = CameraThread(input_source, cmtx, dist, self.camera_panel.update_frame)
+        self.camera_thread = CameraThread(input_source, cmtx, dist, self.camera_panel.update_frame, self.update_coordinates, self)
         self.camera_thread.start()
 
         # Bind event handlers for the buttons
         self.save_button.Bind(wx.EVT_BUTTON, self.OnSaveClick)
-        self.return_button.Bind(wx.EVT_TOGGLEBUTTON, self.OnToggle)
+        self.return_button.Bind(wx.EVT_TOGGLEBUTTON, self.OnToggle())
 
         self.Bind(wx.EVT_CLOSE, self.on_close)
 
         # Maximize the frame to open in full screen
         self.Maximize(True)
+
+        # Add StaticText widgets for displaying coordinates
+        self.tvec_text = wx.StaticText(pnl, label="Translation Vector: [0, 0, 0]")
+        self.rvec_text = wx.StaticText(pnl, label="Rotation Vector: [0, 0, 0]")
+
+        # Add a StaticText for the status indicator
+        self.status_indicator = wx.StaticText(pnl, label="Status: Not Matched")
+        main_sizer.Add(self.status_indicator, 0, wx.ALIGN_CENTER | wx.ALL, 5)
+
+        # ComboBox for selecting images
+        self.image_selector = wx.ComboBox(pnl, choices=[], style=wx.CB_READONLY)
+        main_sizer.Add(self.image_selector, 0, wx.EXPAND | wx.ALL, 5)
+
+        # Bind the EVT_COMBOBOX event
+        self.image_selector.Bind(wx.EVT_COMBOBOX, self.OnImageSelected)
+
+        # Add the StaticText widgets to the main sizer
+        main_sizer.Add(self.tvec_text, 0, wx.ALIGN_CENTER | wx.ALL, 5)
+        main_sizer.Add(self.rvec_text, 0, wx.ALIGN_CENTER | wx.ALL, 5)
 
         # create a menu bar
         self.makeMenuBar()
@@ -99,12 +134,47 @@ class HelloFrame(wx.Frame):
         # and a status bar
         #self.CreateStatusBar()
         #self.SetStatusText("Welcome to wxPython!")
+    def update_coordinates(self, tvec, rvec):
+        # Format the vectors for display
+        tvec_str = f"[{tvec[0][0]:.2f}, {tvec[1][0]:.2f}, {tvec[2][0]:.2f}]"
+        rvec_str = f"[{rvec[0][0]:.2f}, {rvec[1][0]:.2f}, {rvec[2][0]:.2f}]"
+
+        # Update the StaticText widgets
+        self.tvec_text.SetLabel(f"Translation Vector: {tvec_str}")
+        self.rvec_text.SetLabel(f"Rotation Vector: {rvec_str}")
+
+    def populate_image_selector(self):
+        saved_images_dir = r'savedImages/images'
+        image_files = [f for f in os.listdir(saved_images_dir) if os.path.isfile(os.path.join(saved_images_dir, f))]
+        self.image_selector.Clear()
+        self.image_selector.AppendItems(image_files)
+
+    def OnImageSelected(self, event):
+        selected_image = self.image_selector.GetValue()
+        if selected_image:
+            print(f"Returning to location associated with {selected_image}")
+            qr.saved_tvec, qr.saved_rvec = qr.getInitialPoints(selected_image)
+            qr.returnToLoc(self)
+        else:
+            print("No image selected")
+
+    def update_status(self, matched):
+        if matched:
+            self.status_indicator.SetLabel("Status: Matched")
+            self.status_indicator.SetForegroundColour(wx.Colour(0, 255, 0))  
+            print("Status: Matched")
+        else:
+            self.status_indicator.SetLabel("Status: Not Matched")
+            self.status_indicator.SetForegroundColour(wx.Colour(255, 0, 0)) 
+            print("Status: Not Matched")
 
     def on_close(self, event):
-        # Stop the camera thread and close the frame
+        print("Closing application...")
         self.camera_thread.stop()
         self.camera_thread.join()
-        self.Destroy()    
+        print("Camera thread stopped.")
+        self.Destroy()
+        print("Application closed.")   
 
     def makeMenuBar(self):
         """
@@ -161,20 +231,23 @@ class HelloFrame(wx.Frame):
                       wx.OK|wx.ICON_INFORMATION)
         
     def OnToggle(self,event): 
-        state = event.GetEventObject().GetValue() 
-        if state == True: 
-            print( "off" )
-            event.GetEventObject().SetLabel("Return?") 
-        else: 
-            print ("on" )
-            event.GetEventObject().SetLabel("Returning")
+        #state = event.GetEventObject().GetValue() 
+
+        self.return_mode_active = event.GetEventObject().GetValue()
+
+        if self.return_mode_active:
+            print("Return mode activated")
+            self.populate_image_selector()
+            event.GetEventObject().SetLabel("Return: on")
+        else:
+            self.update_status(False)
+            print("Return mode deactivated")
+            event.GetEventObject().SetLabel("Return: off")
 
     def OnSaveClick(self, event):
         global saved_rvec, saved_tvec, current_rvec, current_tvec
 
         current_frame = self.camera_thread.current_frame
-
-        #qr.saveImageNLoc(qr.current_rvec, qr.current_tvec)
         if qr.current_rvec is not None and qr.current_tvec is not None and current_frame is not None:
             qr.saveImageNLoc(qr.current_rvec, qr.current_tvec, current_frame)
             print("Saved location:\n", qr.current_rvec, qr.current_tvec)
@@ -187,18 +260,17 @@ class HelloFrame(wx.Frame):
     def ShowOptionDialog(self):
         dlg = wx.MessageDialog(self, "Choose an option:", "Options", wx.YES_NO | wx.ICON_QUESTION)
 
-        # Set custom labels for the buttons
+        # Set labels for the buttons
         dlg.SetYesNoLabels("Camera", "Test Video")
 
         result = dlg.ShowModal()
         if result == wx.ID_YES:
             feedOpt = 1
             print("Option 1 selected")
-            # Call the function for Option 1 here
         elif result == wx.ID_NO:
             feedOpt = 'media/test.mp4'
             print("Option 2 selected")
-            # Call the function for Option 2 here
+
         dlg.Destroy()
         return feedOpt
 

@@ -3,14 +3,21 @@ import numpy as np
 import sys
 import os
 import ast
+import time
+from PIL import Image
+#import pyrealsense2 as rs
 
-DIFF_CONST = 0.05
+DIFF_CONST = 0.08
 retImgSaved = False
 
 current_rvec = None
 current_tvec = None
 saved_rvec = None
 saved_tvec = None
+
+overlay = False
+
+
 #=========================================================================================================
 #Function to get the homeImage coords
 def getInitialPoints(imgName):
@@ -28,8 +35,10 @@ def getInitialPoints(imgName):
                     arrays = ast.literal_eval(data_str)
                     if len(arrays) == 2:
                         #found and extracted the arrays
-                        print("Arrays extracted:", arrays)
-                        return arrays[0], arrays[1]
+                        #print("Arrays extracted:", arrays)
+                        tvec = np.array(arrays[0], dtype=float).reshape((3, 1))
+                        rvec = np.array(arrays[1], dtype=float).reshape((3, 1))
+                        return tvec, rvec
                 except ValueError as e:
                     print("Error parsing data:", e)
                     return None, None
@@ -39,12 +48,25 @@ def getInitialPoints(imgName):
 #=========================================================================================================
 
 def rotation_vector_to_matrix(vec):
-    R, _ = cv.Rodrigues(vec)
-    return R
+    if vec is None:
+        print("Error: rotation vector is None")
+        return None
+    if not isinstance(vec, np.ndarray):
+        print(f"Error: rotation vector is not a numpy array, it is {type(vec)}")
+        return None
+    try:
+        R, _ = cv.Rodrigues(vec)
+        return R
+    except Exception as e:
+        print(f"Error in Rodrigues conversion: {e}")
+        return None
 #=========================================================================================================
 def angular_difference(vec1, vec2):
     R1 = rotation_vector_to_matrix(vec1)
     R2 = rotation_vector_to_matrix(vec2)
+    if R1 is None or R2 is None:
+        print("Error: One of the rotation matrices is None")
+        return 0
     R_diff = np.dot(R1, R2.T)
     trace = np.trace(R_diff)
     angle = np.arccos((trace - 1) / 2.0)
@@ -60,7 +82,9 @@ def calculate_percentage_difference(saved_tvec, live_tvec, saved_rvec, live_rvec
     
     # Use the maximum of distance and angle percentages to ensure 100% accuracy only if both are within the threshold
     total_percentage_diff = max(distance_percentage, angle_percentage)
-    return 100 - total_percentage_diff  # Return 100% if within the threshold, otherwise decrease proportionally
+
+    print("\n-----------\nPercentage from the func: ", total_percentage_diff, "\n")
+    return total_percentage_diff#100 - total_percentage_diff  # Return 100% if within the threshold, otherwise decrease proportionally
 
 #=========================================================================================================
 def read_camera_parameters(filepath = 'camera_parameters/intrinsic.dat'):
@@ -128,11 +152,34 @@ def saveImageNLoc( rvecSaved,tvecSaved, img):
         print('DAT written to file')
                     
 #=========================================================================================================
-def process_frame(frame, cmtx, dist, update_callback=None):
+
+def process_frame(frame, cmtx, dist, update_callback=None, zoom_factor=1.0):
     global current_rvec, current_tvec
 
+    # Define your desired frame rate (e.g., 30 frames per second)
+    desired_frame_rate = 30
+    frame_duration = 1.0 / desired_frame_rate
+
+    # Start time for frame rate control
+    start_time = time.time()
+
+    # Simulate zoom by cropping and resizing
+    if zoom_factor > 1.0:
+        height, width = frame.shape[:2]
+        new_width = int(width / zoom_factor)
+        new_height = int(height / zoom_factor)
+        x_offset = (width - new_width) // 2
+        y_offset = (height - new_height) // 2
+
+        frame = frame[y_offset:y_offset+new_height, x_offset:x_offset+new_width]
+        if zoom_factor > 2.0:
+            frame = cv.resize(frame, (width, height))#, interpolation=cv.INTER_LINEAR)
+        else:
+            frame = cv.resize(frame, (width, height))
+
+        frame = enhance_image(frame)
+
     qr = cv.QRCodeDetector()
-    #img = cv.resize(img, (0,0), fx=1, fy=1) 
     ret_qr, points = qr.detect(frame)
 
     if ret_qr:
@@ -140,16 +187,12 @@ def process_frame(frame, cmtx, dist, update_callback=None):
 
         if len(axis_points) > 0:
             axis_points = axis_points.reshape((4, 2))
-
             origin = (int(axis_points[0][0]), int(axis_points[0][1]))
-
             current_rvec = rvec
             current_tvec = tvec
 
-            # Call the update callback with the new coordinates
             if update_callback is not None:
                 update_callback(tvec, rvec)
-
             for p, c in zip(axis_points[1:], [(255, 0, 0), (0, 255, 0), (0, 0, 255)]):
                     p = (int(p[0]), int(p[1]))
 
@@ -157,36 +200,46 @@ def process_frame(frame, cmtx, dist, update_callback=None):
                     #if origin[0] > 5*img.shape[1] or origin[1] > 5*img.shape[1]:break
                     #if p[0] > 5*img.shape[1] or p[1] > 5*img.shape[1]:break
 
-                    #cv.line(img, origin, p, c, 5)
+                    cv.line(frame, origin, p, c, 5)
 
-
-            # Add more processing as needed, such as drawing text or other markers
+        # Frame rate control
+    elapsed_time = time.time() - start_time
+    time_to_wait = frame_duration - elapsed_time
+    if time_to_wait > 0:
+        time.sleep(time_to_wait)
 
     return frame
+
+def enhance_image(frame):
+    # Apply sharpening filter
+    kernel = np.array([[-1, -1, -1], [-1, 9, -1], [-1, -1, -1]])
+    sharpened_frame = cv.filter2D(frame, -1, kernel)
+    return sharpened_frame
 #=========================================================================================================
 
-def returnToLoc( main_frame):
+def returnToLoc(main_frame):
     global current_rvec, current_tvec, saved_rvec, saved_tvec
-    #saved_rvec, saved_tvec = getInitialPoints(selectedImg)
     if saved_rvec is None or saved_tvec is None or current_rvec is None or current_tvec is None:
         print("--MISSING A VALUE--")
-        return False
-    else:
-        print("\nSAVED rvec: ", saved_rvec, "\nSAVED tvec: ", saved_tvec)
-        print("\nCURR rvec: ", current_rvec, "\ncurrent tvec: ", current_tvec, "\n")
+        return False, 0
+    #else:
+        #print("\nSAVED rvec: ", saved_rvec, "\nSAVED tvec: ", saved_tvec)
+        #print("\nCURR rvec: ", current_rvec, "\ncurrent tvec: ", current_tvec, "\n")
 
-    if (abs(saved_tvec[0] - current_tvec[0]) <= DIFF_CONST and abs(saved_tvec[1] - current_tvec[1]) <= DIFF_CONST and abs(saved_tvec[2] - current_tvec[2]) <= DIFF_CONST
-        and abs(saved_rvec[0] - current_rvec[0]) <= DIFF_CONST and abs(saved_rvec[1] - current_rvec[1]) <= DIFF_CONST and abs(saved_rvec[2] - current_rvec[2]) <= DIFF_CONST):
+    matched = (abs(saved_tvec[0] - current_tvec[0]) <= DIFF_CONST and abs(saved_tvec[1] - current_tvec[1]) <= DIFF_CONST and abs(saved_tvec[2] - current_tvec[2]) <= DIFF_CONST
+        and abs(saved_rvec[0] - current_rvec[0]) <= DIFF_CONST and abs(saved_rvec[1] - current_rvec[1]) <= DIFF_CONST and abs(saved_rvec[2] - current_rvec[2]) <= DIFF_CONST)
+    
+    if matched:
+        percentage = calculate_percentage_difference(saved_tvec, current_tvec, saved_rvec, current_rvec)
         print("--MATCHED--")
         main_frame.update_status(True)
-        return True
+        return True, 100
     else:
+        percentage = calculate_percentage_difference(saved_tvec, current_tvec, saved_rvec, current_rvec)
         print("--NOT MATCHED--")
         main_frame.update_status(False)
-        return False
-
-
-                    
+        return False, percentage
+         
 #=========================================================================================================
                     
 def show_axes(cmtx, dist, in_source):

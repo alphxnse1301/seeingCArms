@@ -3,6 +3,11 @@ import threading
 import cv2 as cv
 import qr
 import os
+import time
+from PIL import Image
+
+overlay = False
+#import pyrealsense2 as rs
 
 #baseRvec = [0,0,0]
 #baseTvec = [0,0,0]
@@ -32,9 +37,10 @@ class CameraThread(threading.Thread):
             ret, frame = cap.read()
             #if ret == False: break
             if ret:
-                processed_frame = qr.process_frame(frame, self.cmtx, self.dist, self.update_callback)
+                processed_frame = qr.process_frame(frame, self.cmtx, self.dist, self.update_callback , zoom_factor=self.main_frame.camera_panel.zoom_factor)
                 self.current_frame = frame
                 wx.CallAfter(self.frame_callback, processed_frame)
+                time.sleep(0.05)
             else:
                 break
         print("Camera thread loop exited.")
@@ -49,19 +55,51 @@ class CameraPanel(wx.Panel):
         super().__init__(parent, size=size)
         self.main_frame = main_frame  
         self.camera_bitmap = wx.StaticBitmap(self, size=size)
+        self.zoom_factor = 1.0  
+        # Initialize zoom factor
+
+        # Create zoom buttons
+        zoom_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        self.zoom_out_button = wx.Button(self, label='-')
+        self.zoom_in_button = wx.Button(self, label='+')
+        zoom_sizer.Add(self.zoom_out_button, 0, wx.ALL, 5)
+        zoom_sizer.Add(self.zoom_in_button, 0, wx.ALL, 5)
+
+        # Bind button events
+        self.zoom_out_button.Bind(wx.EVT_BUTTON, self.on_zoom_out)
+        self.zoom_in_button.Bind(wx.EVT_BUTTON, self.on_zoom_in)
+
+        # Add zoom buttons to the layout
+        main_sizer = wx.BoxSizer(wx.VERTICAL)
+        main_sizer.Add(self.camera_bitmap, 1, wx.EXPAND)
+        main_sizer.Add(zoom_sizer, 0, wx.ALIGN_CENTER)
+        self.SetSizer(main_sizer)
 
     def update_frame(self, frame):
         height, width = frame.shape[:2]
         frame = cv.cvtColor(frame, cv.COLOR_BGR2RGB)
-
+        
         if self.main_frame.return_mode_active:
             selected_image = self.main_frame.image_selector.GetValue()
             if selected_image:
-                if qr.returnToLoc( self.main_frame):  
-                    cv.rectangle(frame, (0, 0), (frame.shape[1], frame.shape[0]), (0, 255, 0), 10)
-
+                overlay_image_path = os.path.join('savedImages', 'images', selected_image)
+                if os.path.exists(overlay_image_path):
+                    overlay_image = cv.imread(overlay_image_path)
+                    overlay_image = cv.resize(overlay_image, (width, height))
+                    frame = cv.addWeighted(frame, 1, overlay_image, 0.5, 0)
+        
         bitmap = wx.Bitmap.FromBuffer(width, height, frame)
         self.camera_bitmap.SetBitmap(bitmap)
+                    
+    # Decrease zoom factor
+    def on_zoom_out(self, event):
+        self.zoom_factor = max(self.zoom_factor - 0.1, 1.0)  
+        print(f"Zoom factor: {self.zoom_factor}")
+
+    # Increase zoom factor
+    def on_zoom_in(self, event):
+        self.zoom_factor = min(self.zoom_factor + 0.1, 5.0)  
+        print(f"Zoom factor: {self.zoom_factor}")
 
 class HelloFrame(wx.Frame):
     def __init__(self, *args, **kw):
@@ -84,15 +122,27 @@ class HelloFrame(wx.Frame):
 
         self.return_mode_active = False
 
+        #Button to toggle the return image overlay
+        self.overlay_button = wx.ToggleButton(pnl, label="Overlay")
+
         # Add buttons to the button sizer
         button_sizer.Add(self.save_button, 0, wx.EXPAND | wx.ALL, 5)
         button_sizer.Add(self.return_button, 0, wx.EXPAND | wx.ALL, 5)
+        button_sizer.Add(self.overlay_button, 0, wx.EXPAND | wx.ALL, 5)
 
         
         # Add the button sizer to the main sizer
         main_sizer.Add(button_sizer, 0, wx.ALIGN_CENTER | wx.ALL, 5)
 
         pnl.SetSizer(main_sizer)
+        
+        # Add StaticText widgets for displaying coordinates
+        self.tvec_text = wx.StaticText(pnl, label="Translation Vector: [0, 0, 0]")
+        self.rvec_text = wx.StaticText(pnl, label="Rotation Vector: [0, 0, 0]")
+        
+        # Add the StaticText widgets to the main sizer
+        main_sizer.Add(self.tvec_text, 0, wx.ALIGN_CENTER | wx.ALL, 5)
+        main_sizer.Add(self.rvec_text, 0, wx.ALIGN_CENTER | wx.ALL, 5)
 
         # Start the camera thread
         cmtx, dist = qr.read_camera_parameters()
@@ -103,15 +153,16 @@ class HelloFrame(wx.Frame):
         # Bind event handlers for the buttons
         self.save_button.Bind(wx.EVT_BUTTON, self.OnSaveClick)
         self.return_button.Bind(wx.EVT_TOGGLEBUTTON, self.OnToggle)
+        self.overlay_button.Bind(wx.EVT_TOGGLEBUTTON, self.OnToggleReturnOverlay)
 
         self.Bind(wx.EVT_CLOSE, self.on_close)
 
         # Maximize the frame to open in full screen
         self.Maximize(True)
 
-        # Add StaticText widgets for displaying coordinates
-        self.tvec_text = wx.StaticText(pnl, label="Translation Vector: [0, 0, 0]")
-        self.rvec_text = wx.StaticText(pnl, label="Rotation Vector: [0, 0, 0]")
+        # Add a text region to display the percentage on return feture on
+        self.percentage_display = wx.StaticText(pnl, label="Percentage: 0%")
+        main_sizer.Add(self.percentage_display, 0, wx.ALIGN_CENTER | wx.ALL, 5)
 
         # Add a StaticText for the status indicator
         self.status_indicator = wx.StaticText(pnl, label="Status: Not Matched")
@@ -123,10 +174,6 @@ class HelloFrame(wx.Frame):
 
         # Bind the EVT_COMBOBOX event
         self.image_selector.Bind(wx.EVT_COMBOBOX, self.OnImageSelected)
-
-        # Add the StaticText widgets to the main sizer
-        main_sizer.Add(self.tvec_text, 0, wx.ALIGN_CENTER | wx.ALL, 5)
-        main_sizer.Add(self.rvec_text, 0, wx.ALIGN_CENTER | wx.ALL, 5)
 
         # create a menu bar
         self.makeMenuBar()
@@ -154,11 +201,12 @@ class HelloFrame(wx.Frame):
         if selected_image:
             print(f"Returning to location associated with {selected_image}")
             qr.saved_tvec, qr.saved_rvec = qr.getInitialPoints(selected_image)
-            qr.returnToLoc(self)
+            matched, percentage = qr.returnToLoc(self)
+            self.update_status(matched, percentage)
         else:
             print("No image selected")
 
-    def update_status(self, matched):
+    def update_status(self, matched, percentage=0):
         if matched:
             self.status_indicator.SetLabel("Status: Matched")
             self.status_indicator.SetForegroundColour(wx.Colour(0, 255, 0))  
@@ -167,6 +215,9 @@ class HelloFrame(wx.Frame):
             self.status_indicator.SetLabel("Status: Not Matched")
             self.status_indicator.SetForegroundColour(wx.Colour(255, 0, 0)) 
             print("Status: Not Matched")
+        
+        print(f"Percentage: {percentage}%")
+        self.percentage_display.SetLabel(f"Percentage: {percentage}%")
 
     def on_close(self, event):
         print("Closing application...")
@@ -193,6 +244,9 @@ class HelloFrame(wx.Frame):
         # When using a stock ID we don't need to specify the menu item's
         # label
         exitItem = fileMenu.Append(wx.ID_EXIT)
+        
+        #new menu item for toggling the return overlay
+        #self.returnOverlayItem = fileMenu.Append(wx.ID_ANY, "Return Overlay\tCtrl-R", "Toggle return overlay", kind=wx.ITEM_CHECK)
 
         # Now a help menu for the about item
         helpMenu = wx.Menu()
@@ -205,6 +259,7 @@ class HelloFrame(wx.Frame):
         menuBar = wx.MenuBar()
         menuBar.Append(fileMenu, "&File")
         menuBar.Append(helpMenu, "&Help")
+        #menuBar.Append(helpMenu, "&Return")
 
         # Give the menu bar to the frame
         self.SetMenuBar(menuBar)
@@ -215,6 +270,20 @@ class HelloFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, self.OnHello, helloItem)
         self.Bind(wx.EVT_MENU, self.OnExit,  exitItem)
         self.Bind(wx.EVT_MENU, self.OnAbout, aboutItem)
+        #self.Bind(wx.EVT_MENU, self.OnToggleReturnOverlay, self.returnOverlayItem)
+
+    def OnToggleReturnOverlay(self, event):
+        self.return_mode_active = not self.return_mode_active
+        if self.return_mode_active:
+            print("Return overlay activated")
+            self.returnOverlayItem.Check(True)
+            event.GetEventObject().SetLabel("Overlay: on")
+        else:
+            print("Return overlay deactivated")
+            self.returnOverlayItem.Check(False)
+            event.GetEventObject().SetLabel("Overalay: off")
+        self.camera_panel.Refresh()
+
 
     def OnExit(self, event):
         """Close the frame, terminating the application."""
@@ -265,7 +334,7 @@ class HelloFrame(wx.Frame):
 
         result = dlg.ShowModal()
         if result == wx.ID_YES:
-            feedOpt = 1
+            feedOpt = 0
             print("Option 1 selected")
         elif result == wx.ID_NO:
             feedOpt = 'media/test.mp4'

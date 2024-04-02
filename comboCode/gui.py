@@ -102,7 +102,7 @@ class HelloFrame(wx.Frame):
 
         # Bind event handlers for the buttons
         self.save_button.Bind(wx.EVT_BUTTON, self.OnSaveClick)
-        self.return_button.Bind(wx.EVT_TOGGLEBUTTON, self.OnToggle())
+        self.return_button.Bind(wx.EVT_TOGGLEBUTTON, self.OnToggle)
 
         self.Bind(wx.EVT_CLOSE, self.on_close)
 

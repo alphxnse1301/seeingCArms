@@ -140,13 +140,17 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             processed_frame = qr.process_frame(frame, self.cmtx, self.dist, zoom_factor=self.zoom_factor)
 
             # Update current rvec and tvec labels
-            self.currRvecs.setText(f"Rotation: [{qr.current_rvec[0][0]:.2f}, {qr.current_rvec[1][0]:.2f}, {qr.current_rvec[2][0]:.2f}]")
-            self.currTvecs.setText(f"Translation: [{qr.current_tvec[0][0]:.2f}, {qr.current_tvec[1][0]:.2f}, {qr.current_tvec[2][0]:.2f}]")
+            if qr.current_rvec is not None and qr.current_tvec is not None:
+                self.currRvecs.setText(f"Rotation: [{qr.current_rvec[0][0]:.2f}, {qr.current_rvec[1][0]:.2f}, {qr.current_rvec[2][0]:.2f}]")
+                self.currTvecs.setText(f"Translation: [{qr.current_tvec[0][0]:.2f}, {qr.current_tvec[1][0]:.2f}, {qr.current_tvec[2][0]:.2f}]")
+            else:
+                self.currRvecs.setText("Rotation: N/A")
+                self.currTvecs.setText("Translation: N/A")
 
             # Apply the return feature if it's active
             if self.return_feature_on:
                 matched, percentage = qr.returnToLoc(self)
-                self.percentProgressBar.setValue(percentage)
+                self.percentProgressBar.setValue(int(percentage)) 
                 if matched:
                     self.statusLabel.setText("Status: Matched")
                     self.statusLabel.setStyleSheet("color: green;")

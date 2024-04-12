@@ -169,7 +169,7 @@ def saveImageNLoc( rvecSaved,tvecSaved, img):
                     
 #=========================================================================================================
 
-def process_frame(frame, cmtx, dist, update_callback=None, zoom_factor=1.0):
+def process_frame(frame, cmtx, dist, update_callback=None, zoom_factor=1.0, return_tvec = None, return_rvec = None):
     global current_rvec, current_tvec
 
     # Define your desired frame rate (e.g., 30 frames per second)
@@ -209,6 +209,50 @@ def process_frame(frame, cmtx, dist, update_callback=None, zoom_factor=1.0):
 
             if update_callback is not None:
                 update_callback(tvec, rvec)
+            '''This add arrows of what way it needs to go
+            if return_tvec is not None:
+                for i, (p, c) in enumerate(zip(axis_points[1:], [(255, 0, 0), (0, 255, 0), (0, 0, 255)])):
+                    p = (int(p[0]), int(p[1]))
+                    direction = np.sign(return_tvec[i] - tvec[i])
+                    scaled_point = (int(origin[0] + (p[0] - origin[0]) * direction),
+                                    int(origin[1] + (p[1] - origin[1]) * direction))
+                    cv.arrowedLine(frame, origin, scaled_point, c, 5, tipLength=0.3)
+            else:
+                for p, c in zip(axis_points[1:], [(255, 0, 0), (0, 255, 0), (0, 0, 255)]):
+                    p = (int(p[0]), int(p[1]))
+                    cv.line(frame, origin, p, c, 5)'''
+
+            ''' this does scaling of the axis indicators on return'''
+            # Scale factor for axis lines based on the difference in tvec
+            if return_tvec is not None:
+                scale_factors = np.clip(1 - np.abs(return_tvec - tvec) / DIFF_CONST, 0.1, 1)
+            else:
+                scale_factors = [1, 1, 1]
+
+            for i, (p, c) in enumerate(zip(axis_points[1:], [(255, 0, 0), (0, 255, 0), (0, 0, 255)])):
+                p = (int(p[0]), int(p[1]))
+                scaled_point = (int(origin[0] + (p[0] - origin[0]) * scale_factors[i]),
+                                int(origin[1] + (p[1] - origin[1]) * scale_factors[i]))
+                cv.line(frame, origin, scaled_point, c, 5)
+            
+            '''This is to show the roation needed
+            if return_rvec is not None:
+                angle_diff = angular_difference(current_rvec, return_rvec)
+                rotation_scale = np.clip(angle_diff / np.pi, 0, 1)  # Scale based on angular difference
+                rotation_direction = np.sign(return_rvec - current_rvec)  # Determine direction of rotation
+
+                # Draw rotation indicators (arrows) to the side of the frame
+                frame_height, frame_width = frame.shape[:2]
+                indicator_start = (frame_width - 50, frame_height // 2)
+                for i in range(3):
+                    indicator_end = (
+                        indicator_start[0],
+                        int(indicator_start[1] + 50 * rotation_scale * rotation_direction[i])
+                    )
+                    cv.arrowedLine(frame, indicator_start, indicator_end, (255, 255, 255), 2, tipLength=0.3)
+                    indicator_start = (indicator_start[0] - 20, indicator_start[1])'''
+
+            '''Standard axis
             for p, c in zip(axis_points[1:], [(255, 0, 0), (0, 255, 0), (0, 0, 255)]):
                     p = (int(p[0]), int(p[1]))
 
@@ -216,7 +260,7 @@ def process_frame(frame, cmtx, dist, update_callback=None, zoom_factor=1.0):
                     #if origin[0] > 5*img.shape[1] or origin[1] > 5*img.shape[1]:break
                     #if p[0] > 5*img.shape[1] or p[1] > 5*img.shape[1]:break
 
-                    cv.line(frame, origin, p, c, 5)
+                    cv.line(frame, origin, p, c, 5)'''
 
     # Frame rate control
     elapsed_time = time.time() - start_time

@@ -7,7 +7,7 @@ import time
 from PIL import Image
 #import pyrealsense2 as rs
 
-DIFF_CONST = 0.08
+DIFF_CONST = 0.1
 retImgSaved = False
 
 current_rvec = None
@@ -23,6 +23,7 @@ overlay = False
 def getInitialPoints(imgName):
     #fname = input('Enter name of Base Image without extension\n>')
     target_line_prefix = imgName + ':'
+    print("Looking for image data with prefix:", target_line_prefix)
     #print(imgName)
     
     with open('savedImages/imgData/Data.txt', 'r') as file:
@@ -72,7 +73,7 @@ def angular_difference(vec1, vec2):
     angle = np.arccos((trace - 1) / 2.0)
     return np.degrees(angle)
 #=========================================================================================================
-def calculate_percentage_difference(saved_tvec, live_tvec, saved_rvec, live_rvec, threshold= DIFF_CONST):
+'''def calculate_percentage_difference(saved_tvec, live_tvec, saved_rvec, live_rvec, threshold= DIFF_CONST):
     distance_diff = np.linalg.norm(saved_tvec - live_tvec)
     angle_diff = angular_difference(saved_rvec, live_rvec)
     
@@ -84,7 +85,22 @@ def calculate_percentage_difference(saved_tvec, live_tvec, saved_rvec, live_rvec
     total_percentage_diff = max(distance_percentage, angle_percentage)
 
     print("\n-----------\nPercentage from the func: ", total_percentage_diff, "\n")
-    return total_percentage_diff#100 - total_percentage_diff  # Return 100% if within the threshold, otherwise decrease proportionally
+    return total_percentage_diff#100 - total_percentage_diff  # Return 100% if within the threshold, otherwise decrease proportionally'''
+
+def calculate_percentage_difference(saved_tvec, live_tvec, saved_rvec, live_rvec, threshold=DIFF_CONST):
+    distance_diff = np.linalg.norm(saved_tvec - live_tvec)
+    angle_diff = angular_difference(saved_rvec, live_rvec)
+    
+    # Calculate the percentage difference based on the threshold
+    distance_percentage = min((distance_diff / threshold) * 100, 100)
+    angle_percentage = min((angle_diff / threshold) * 100, 100)
+    
+    # Check if both percentages are 100
+    if distance_percentage == 100 and angle_percentage == 100:
+        return 100
+    else:
+        # Return the lower of the two percentages to indicate the degree of matching
+        return min(distance_percentage, angle_percentage)
 
 #=========================================================================================================
 def read_camera_parameters(filepath = 'camera_parameters/intrinsic.dat'):
@@ -202,7 +218,7 @@ def process_frame(frame, cmtx, dist, update_callback=None, zoom_factor=1.0):
 
                     cv.line(frame, origin, p, c, 5)
 
-        # Frame rate control
+    # Frame rate control
     elapsed_time = time.time() - start_time
     time_to_wait = frame_duration - elapsed_time
     if time_to_wait > 0:
@@ -220,7 +236,15 @@ def enhance_image(frame):
 def returnToLoc(main_frame):
     global current_rvec, current_tvec, saved_rvec, saved_tvec
     if saved_rvec is None or saved_tvec is None or current_rvec is None or current_tvec is None:
-        print("--MISSING A VALUE--")
+        if saved_rvec is None:
+            print("saved rvec = none")
+        if saved_tvec is None:
+            print("saved tvec = none")
+        if current_rvec is None:
+            print("curr rvec = none")
+        if current_tvec is None:
+            print("curr tvec = none")
+        #print("--MISSING A VALUE--")
         return False, 0
     #else:
         #print("\nSAVED rvec: ", saved_rvec, "\nSAVED tvec: ", saved_tvec)
@@ -232,12 +256,12 @@ def returnToLoc(main_frame):
     if matched:
         percentage = calculate_percentage_difference(saved_tvec, current_tvec, saved_rvec, current_rvec)
         print("--MATCHED--")
-        main_frame.update_status(True)
+        #main_frame.update_status(True)
         return True, 100
     else:
         percentage = calculate_percentage_difference(saved_tvec, current_tvec, saved_rvec, current_rvec)
         print("--NOT MATCHED--")
-        main_frame.update_status(False)
+        #main_frame.update_status(False)
         return False, percentage
          
 #=========================================================================================================

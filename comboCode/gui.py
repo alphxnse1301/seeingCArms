@@ -81,7 +81,7 @@ class CameraPanel(wx.Panel):
         
         if self.main_frame.return_mode_active:
             selected_image = self.main_frame.image_selector.GetValue()
-            if selected_image:
+            if selected_image and qr.returnToLoc(self.main_frame):
                 overlay_image_path = os.path.join('savedImages', 'images', selected_image)
                 if os.path.exists(overlay_image_path):
                     overlay_image = cv.imread(overlay_image_path)
@@ -276,11 +276,11 @@ class HelloFrame(wx.Frame):
         self.return_mode_active = not self.return_mode_active
         if self.return_mode_active:
             print("Return overlay activated")
-            self.returnOverlayItem.Check(True)
+            #self.returnOverlayItem.Check(True)
             event.GetEventObject().SetLabel("Overlay: on")
         else:
             print("Return overlay deactivated")
-            self.returnOverlayItem.Check(False)
+            #self.returnOverlayItem.Check(False)
             event.GetEventObject().SetLabel("Overalay: off")
         self.camera_panel.Refresh()
 
@@ -326,7 +326,7 @@ class HelloFrame(wx.Frame):
         btn = event.GetEventObject().GetLabel() 
         print("Label of pressed button = ",btn )
 
-    def ShowOptionDialog(self):
+    '''def ShowOptionDialog(self):
         dlg = wx.MessageDialog(self, "Choose an option:", "Options", wx.YES_NO | wx.ICON_QUESTION)
 
         # Set labels for the buttons
@@ -336,11 +336,71 @@ class HelloFrame(wx.Frame):
         if result == wx.ID_YES:
             feedOpt = 0
             print("Option 1 selected")
+        elif result == wx.ID_OK:
+            feedOpt = 1
+            print("Option 2 selected")
+        elif result == wx.ID_CANCEL:
+            feedOpt = 2
+            print("Option 3 selected")
         elif result == wx.ID_NO:
             feedOpt = 'media/test.mp4'
-            print("Option 2 selected")
+            print("Option 4 selected")
 
         dlg.Destroy()
+        return feedOpt'''
+    
+    def ShowOptionDialog(self):
+        # Create a custom dialog
+        dlg = wx.Dialog(self, title="Options", size=(300, 200))
+
+        # Create a sizer for layout
+        sizer = wx.BoxSizer(wx.VERTICAL)
+
+        # Add a message
+        message = wx.StaticText(dlg, label="Choose an option:")
+        sizer.Add(message, 0, wx.ALL | wx.CENTER, 10)
+
+        # Create buttons for options
+        camera_btn = wx.Button(dlg, id=wx.ID_ANY, label="Cam @ in 0")
+        option3_btn = wx.Button(dlg, id=wx.ID_ANY, label="Cam @ in 1")
+        option4_btn = wx.Button(dlg, id=wx.ID_ANY, label="Cam @ in 2")
+        test_video_btn = wx.Button(dlg, id=wx.ID_ANY, label="Test Video")
+
+        # Add buttons to sizer
+        sizer.Add(camera_btn, 0, wx.ALL | wx.CENTER, 5)
+        sizer.Add(option3_btn, 0, wx.ALL | wx.CENTER, 5)
+        sizer.Add(option4_btn, 0, wx.ALL | wx.CENTER, 5)
+        sizer.Add(test_video_btn, 0, wx.ALL | wx.CENTER, 5)
+
+        # Bind events for buttons
+        camera_btn.Bind(wx.EVT_BUTTON, lambda event: dlg.EndModal(0))
+        option3_btn.Bind(wx.EVT_BUTTON, lambda event: dlg.EndModal(1))
+        option4_btn.Bind(wx.EVT_BUTTON, lambda event: dlg.EndModal(2))
+        test_video_btn.Bind(wx.EVT_BUTTON, lambda event: dlg.EndModal(3))
+        # Set sizer and layout
+        dlg.SetSizer(sizer)
+        dlg.Layout()
+
+        # Show the dialog and get the result
+        result = dlg.ShowModal()
+        dlg.Destroy()
+
+        # Handle the result
+        if result == 0:
+            feedOpt = 0
+            print("Camera selected")
+        elif result == 1:
+            feedOpt = 1
+            print("Option 3 selected")
+        elif result == 2:
+            feedOpt = 2
+            print("Option 4 selected")
+        elif result == 3:
+            feedOpt = 'media/test.mp4'
+            print("Test Video selected")
+        else:
+            feedOpt = None
+
         return feedOpt
 
 class MyApp(wx.App):

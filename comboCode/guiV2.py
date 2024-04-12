@@ -106,7 +106,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         #self.listWidget.currentIndexChanged.connect(self.set_saved_vectors)
 
         #set selectability if using a list tree
-        self.listWidget2.clicked.connect(self.set_saved_vectors)
+        self.listWidget2.itemClicked.connect(self.set_saved_vectors)
 
     #------------------ Staring camera ---------------------
         # Begin camera feed
@@ -140,8 +140,8 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             processed_frame = qr.process_frame(frame, self.cmtx, self.dist, zoom_factor=self.zoom_factor)
 
             # Update current rvec and tvec labels
-            #self.currRvecs.setText(f"Rotation: [{qr.current_rvec[0][0]:.2f}, {qr.current_rvec[1][0]:.2f}, {qr.current_rvec[2][0]:.2f}]")
-            #self.currTvecs.setText(f"Translation: [{qr.current_tvec[0][0]:.2f}, {qr.current_tvec[1][0]:.2f}, {qr.current_tvec[2][0]:.2f}]")
+            self.currRvecs.setText(f"Rotation: [{qr.current_rvec[0][0]:.2f}, {qr.current_rvec[1][0]:.2f}, {qr.current_rvec[2][0]:.2f}]")
+            self.currTvecs.setText(f"Translation: [{qr.current_tvec[0][0]:.2f}, {qr.current_tvec[1][0]:.2f}, {qr.current_tvec[2][0]:.2f}]")
 
             # Apply the return feature if it's active
             if self.return_feature_on:
@@ -211,7 +211,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
     #
     #set display rvec and tvec of saved qr-code if using a list tree to display
     def set_saved_vectors(self, item):
-        img_name = self.itemText(item)
+        img_name = item.text()
         qr.saved_tvec, qr.saved_rvec = qr.getInitialPoints(img_name)
         if qr.saved_tvec is not None and qr.saved_rvec is not None:
             self.savedRvecs.setText(f"Rotation: [{qr.saved_rvec[0][0]:.2f}, {qr.saved_rvec[1][0]:.2f}, {qr.saved_rvec[2][0]:.2f}]")

@@ -7,7 +7,7 @@ import time
 from PIL import Image
 #import pyrealsense2 as rs
 
-DIFF_CONST = 0.1
+DIFF_CONST = 0.05
 retImgSaved = False
 
 current_rvec = None
@@ -16,6 +16,10 @@ saved_rvec = None
 saved_tvec = None
 
 overlay = False
+
+returning = False
+
+savedZoom = None #not implemented currently
 
 
 #=========================================================================================================
@@ -39,6 +43,7 @@ def getInitialPoints(imgName):
                         #print("Arrays extracted:", arrays)
                         tvec = np.array(arrays[0], dtype=float).reshape((3, 1))
                         rvec = np.array(arrays[1], dtype=float).reshape((3, 1))
+                        #savedZoom = np.array(arrays[1], dtype=float)
                         return tvec, rvec
                 except ValueError as e:
                     print("Error parsing data:", e)
@@ -73,19 +78,6 @@ def angular_difference(vec1, vec2):
     angle = np.arccos((trace - 1) / 2.0)
     return np.degrees(angle)
 #=========================================================================================================
-'''def calculate_percentage_difference(saved_tvec, live_tvec, saved_rvec, live_rvec, threshold= DIFF_CONST):
-    distance_diff = np.linalg.norm(saved_tvec - live_tvec)
-    angle_diff = angular_difference(saved_rvec, live_rvec)
-    
-    # Calculate the percentage difference based on the threshold
-    distance_percentage = min((distance_diff / threshold) * 100, 100)
-    angle_percentage = min((angle_diff / threshold) * 100, 100)
-    
-    # Use the maximum of distance and angle percentages to ensure 100% accuracy only if both are within the threshold
-    total_percentage_diff = max(distance_percentage, angle_percentage)
-
-    print("\n-----------\nPercentage from the func: ", total_percentage_diff, "\n")
-    return total_percentage_diff#100 - total_percentage_diff  # Return 100% if within the threshold, otherwise decrease proportionally'''
 
 def calculate_percentage_difference(saved_tvec, live_tvec, saved_rvec, live_rvec, threshold=DIFF_CONST):
     distance_diff = np.linalg.norm(saved_tvec - live_tvec)
@@ -101,6 +93,33 @@ def calculate_percentage_difference(saved_tvec, live_tvec, saved_rvec, live_rvec
     else:
         # Return the lower of the two percentages to indicate the degree of matching
         return min(distance_percentage, angle_percentage)
+    
+#=========================================================================================================
+
+def returnGuidance(current_rvec, saved_rvec, current_tvec, saved_tvec):
+    rvecGuide = "No rotation adjustment needed."
+    tvecGuide = "No translation adjustment needed."
+
+    axis_names = ['X-axis (left-right)', 'Y-axis (up-down)', 'Z-axis (forward-backward)']
+    rotation_directions = ['clockwise', 'counterclockwise']
+    move_directions = ['right', 'left', 'up', 'down', 'backward', 'forward']
+
+   # Handling rotations
+    for i, (current, saved) in enumerate(zip( saved_rvec, current_rvec)):
+        diff = current - saved
+        if abs(diff) > DIFF_CONST:
+            direction = rotation_directions[int(diff < 0)]
+            rvecGuide = f"Rotate {direction} around the {axis_names[i]} to adjust."
+
+    # Handling translations
+    for i, (current, saved) in enumerate(zip( saved_tvec,current_tvec)):
+        diff = current - saved
+        if abs(diff) > DIFF_CONST:
+            index = 2 * i + int(diff < 0)
+            tvecGuide = f"Move {move_directions[index]} to adjust along the {axis_names[i]}."
+
+    return rvecGuide, tvecGuide
+
 
 #=========================================================================================================
 def read_camera_parameters(filepath = 'camera_parameters/intrinsic.dat'):
@@ -148,11 +167,11 @@ def get_qr_coords(cmtx, dist, points):
 
 #=========================================================================================================
     
-def saveImageNLoc( rvecSaved,tvecSaved, img):
+def saveImageNLoc( rvecSaved,tvecSaved, img, zoomFactor):
     dirPath = r'savedImages/images'
     count = 0
 
-    savedDat = [tvecSaved.flatten().tolist(),rvecSaved.flatten().tolist()]#savedDat = [list(tvecSaved),list(rvecSaved)] 
+    savedDat = [tvecSaved.flatten().tolist(),rvecSaved.flatten().tolist()] #, zoomFactor]
 
     for path in os.listdir(dirPath):
         if os.path.isfile(os.path.join(dirPath, path)):
@@ -193,7 +212,7 @@ def process_frame(frame, cmtx, dist, update_callback=None, zoom_factor=1.0, retu
         else:
             frame = cv.resize(frame, (width, height))
 
-        frame = enhance_image(frame)
+        #frame = enhance_image(frame)
 
     qr = cv.QRCodeDetector()
     ret_qr, points = qr.detect(frame)
@@ -218,15 +237,17 @@ def process_frame(frame, cmtx, dist, update_callback=None, zoom_factor=1.0, retu
                                     int(origin[1] + (p[1] - origin[1]) * direction))
                     cv.arrowedLine(frame, origin, scaled_point, c, 5, tipLength=0.3)
             else:
+                print("tvec is none")
                 for p, c in zip(axis_points[1:], [(255, 0, 0), (0, 255, 0), (0, 0, 255)]):
                     p = (int(p[0]), int(p[1]))
                     cv.line(frame, origin, p, c, 5)'''
 
             ''' this does scaling of the axis indicators on return'''
             # Scale factor for axis lines based on the difference in tvec
-            if return_tvec is not None:
+            if return_tvec is not None and returning:
                 scale_factors = np.clip(1 - np.abs(return_tvec - tvec) / DIFF_CONST, 0.1, 1)
             else:
+                
                 scale_factors = [1, 1, 1]
 
             for i, (p, c) in enumerate(zip(axis_points[1:], [(255, 0, 0), (0, 255, 0), (0, 0, 255)])):
@@ -297,17 +318,29 @@ def returnToLoc(main_frame):
     matched = (abs(saved_tvec[0] - current_tvec[0]) <= DIFF_CONST and abs(saved_tvec[1] - current_tvec[1]) <= DIFF_CONST and abs(saved_tvec[2] - current_tvec[2]) <= DIFF_CONST
         and abs(saved_rvec[0] - current_rvec[0]) <= DIFF_CONST and abs(saved_rvec[1] - current_rvec[1]) <= DIFF_CONST and abs(saved_rvec[2] - current_rvec[2]) <= DIFF_CONST)
     
+
     if matched:
         percentage = calculate_percentage_difference(saved_tvec, current_tvec, saved_rvec, current_rvec)
         print("--MATCHED--")
         #main_frame.update_status(True)
-        return True, 100
+        return True, percentage
     else:
         percentage = calculate_percentage_difference(saved_tvec, current_tvec, saved_rvec, current_rvec)
         print("--NOT MATCHED--")
         #main_frame.update_status(False)
         return False, percentage
-         
+#=========================================================================================================
+def clearAllData():  #Doesnt work
+    dirPath = r'savedImages/images/'
+
+    for file in os.listdir(dirPath):
+        if file.endswith('.png'):
+            os.remove(file) 
+            
+    
+    with open('savedImages/imgData/Data.txt', 'w') as f:
+        #f.truncate()
+        pass
 #=========================================================================================================
                     
 def show_axes(cmtx, dist, in_source):

@@ -1,13 +1,15 @@
 import sys
 import os
 import platform
-from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QLabel, QPushButton, QWidget, QListWidget
+import numpy as np
+from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QLabel, QPushButton, QWidget, QListWidget, QAction
 from PyQt5.QtGui import QImage, QPixmap
-from PyQt5.QtCore import QTimer, Qt
+from PyQt5.QtCore import QTimer, Qt, QSize
 from PyQt5.QtMultimedia import *
 from PyQt5.QtWidgets import *
 import cv2
 import qr
+from PIL import Image, ImageQt
 from designerUI import *
 
 class MainWindow(QMainWindow, Ui_MainWindow):
@@ -17,6 +19,9 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.cmtx, self.dist = qr.read_camera_parameters()
         self.camera_index = self.find_realsense_camera()
         self.return_feature_on = False
+        self.overlay_on = False
+        self.saved_img_name = None
+        #self.returning = False
         self.initUI()
 
     def find_realsense_camera(self):
@@ -33,11 +38,12 @@ class MainWindow(QMainWindow, Ui_MainWindow):
     def initUI(self):
         #creating zoom factor for camera feed
         self.zoom_factor = 1.0
+
         # Main vertical layout for the central widget
-        mainLayout = QVBoxLayout()
+        '''mainLayout = QVBoxLayout()
 
         # Add stretch to center the camera feed label vertically
-        mainLayout.addStretch()
+        #mainLayout.addStretch()
         
         # Camera feed label
         mainLayout.addWidget(self.cameraFeedLabel)
@@ -92,9 +98,145 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         # Status label
         mainLayout.addWidget(self.statusLabel)
         mainLayout.addWidget(self.percentProgressBar)
+        '''
+
+        #Creation of layout fro frame 1 of horizontal layout
+        self.frameLayout = QVBoxLayout(self.frame)  
+
+        #setting camera feeds size
+        #self.cameraFeedLabel.setFixedSize(640,480)
+
+        # Add camera feed to the frame's layout
+        self.frameLayout.addWidget(self.cameraFeedLabel)
+        self.cameraFeedLabel.setAlignment(QtCore.Qt.AlignCenter)
+
+        #setting button sizes and fonts
+        button_size = QSize(200, 100)  # Width = 100, Height = 50
+
+        self.saveBtn.setFixedSize(button_size)
+        self.returnBtn.setFixedSize(button_size)
+        self.overlayBtn.setFixedSize(button_size)
+        self.incZoomBtn.setFixedSize(button_size)
+        self.decZoomBtn.setFixedSize(button_size)
+
+        # Set a larger font for the buttons
+        button_font = self.saveBtn.font() 
+        button_font.setPointSize(16)
+
+        self.saveBtn.setFont(button_font)
+        self.returnBtn.setFont(button_font)
+        self.overlayBtn.setFont(button_font)
+        self.incZoomBtn.setFont(button_font)
+        self.decZoomBtn.setFont(button_font)
+
+        #creat text to display current zoom factor
+        self.zoomlabel = QLabel('Zoom: 1.0', self)
+        self.zoomlabel.setFont(self.saveBtn.font() )
+
+        #setting saved and curr qr code text size
+        text_font = self.saveBtn.font() 
+        text_font.setPointSize(16)
+
+        remove_font = self.saveBtn.font() 
+        remove_font.setPointSize(1)
+
+        self.currVectorsLabel.setFont(text_font)
+        self.savedVectorsLabel.setFont(remove_font)   #self.savedVectorsLabel.setFont(text_font)          !!!
+        self.savedRvecs.setFont(remove_font)    #self.savedRvecs.setFont(text_font)                       !!!
+        self.savedTvecs.setFont(remove_font)  #self.savedTvecs.setFont(text_font)                         !!!
+        self.currRvecs.setFont(text_font)
+        self.currTvecs.setFont(text_font)
+
+        self.statusLabel.setFont(text_font)
+
+        imgList_font = self.saveBtn.font() 
+        imgList_font.setPointSize(14)
+
+        self.imgListWidget.setFont(imgList_font)
+
+        self.imgListWidget.setMinimumWidth(300)
+        self.imgListWidget.setMinimumHeight(750)
+
+    # --- frame_2: Adjusting QListWidget to fill 1/2 ---
+        self.frame2Layout = QVBoxLayout(self.frame_2)
+        self.imgListWidget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)  # Adjusted for expanding
+        self.frame2Layout.addWidget(self.imgListWidget)
+
+        # This stretch will push the QListWidget to the top
+        self.frame2Layout.addStretch(1)
+
+        # --- For frame_1: Centering items ---
+
+        # horizontal layout w/ stretches for centering horizontally
+        hCameraLayout = QHBoxLayout()
+        hCameraLayout.addStretch(1)
+        hCameraLayout.addWidget(self.cameraFeedLabel)
+        hCameraLayout.addStretch(1)
+
+        #vertical layout w/ stretches for centering vertically
+        vCameraLayout = QVBoxLayout()
+        vCameraLayout.addStretch(1)
+        vCameraLayout.addLayout(hCameraLayout)
+        vCameraLayout.addStretch(1)
+
+        self.frameLayout.addLayout(vCameraLayout)
 
         # Set the main layout as the layout for the central widget
-        self.centralwidget.setLayout(mainLayout)
+        self.centralwidget.setLayout(self.horizontalLayout_2)
+
+        zoomLayout0 = QHBoxLayout()
+        zoomLayout0.addWidget(self.zoomlabel)
+
+        self.frameLayout.addLayout(zoomLayout0)
+        # Image zoom button layout
+        zoomLayout = QHBoxLayout()
+        zoomLayout.addWidget(self.incZoomBtn)
+        zoomLayout.addWidget(self.decZoomBtn)
+        self.frameLayout.addLayout(zoomLayout)
+
+        # Horizontal layout for the buttons
+        buttonsLayout = QHBoxLayout()
+        buttonsLayout.addWidget(self.saveBtn)
+
+        buttonsLayout.addWidget(self.returnBtn)
+        buttonsLayout.addWidget(self.overlayBtn)
+        self.frameLayout.addLayout(buttonsLayout)
+
+        # Adding Status label and progress bar
+        self.frameLayout.addWidget(self.statusLabel)
+        self.statusLabel.setAlignment(QtCore.Qt.AlignCenter)
+
+        self.frameLayout.addWidget(self.percentProgressBar)
+
+        # Horizontal layout for tracking information labels   
+        indicatorLayout = QHBoxLayout()
+        indicatorLayout.addWidget(self.currVectorsLabel)
+
+        #commented out for displaying adjustment info               !!!
+        #indicatorLayout.addWidget(self.savedVectorsLabel)
+
+        self.frameLayout.addLayout(indicatorLayout)
+
+        # Layout for Rvecs and Tvecs labels
+        rvecLayout = QHBoxLayout()
+        rvecLayout.addWidget(self.currRvecs)
+
+        #commented out for displaying adjustment info               !!!
+        #rvecLayout.addWidget(self.savedRvecs)
+
+        self.frameLayout.addLayout(rvecLayout)
+
+        tvecLayout = QHBoxLayout()
+        tvecLayout.addWidget(self.currTvecs)
+
+        #commented out for displaying adjustment info               !!!
+        #tvecLayout.addWidget(self.savedTvecs)
+
+        self.frameLayout.addLayout(tvecLayout)
+
+        # Add a stretch to push everything up
+        self.frameLayout.addStretch()
+
 
     #------------------ Connecting funtionality of button---------------------
         self.saveBtn.clicked.connect(self.save_image)
@@ -102,11 +244,17 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.incZoomBtn.clicked.connect(self.increase_zoom)
         self.decZoomBtn.clicked.connect(self.decrease_zoom)
 
+        self.overlayBtn.clicked.connect(self.toggle_overlay)
+
         # Set selectability if using a comboBox
         #self.listWidget.currentIndexChanged.connect(self.set_saved_vectors)
 
         #set selectability if using a list tree
-        self.listWidget2.itemClicked.connect(self.set_saved_vectors)
+        self.imgListWidget.itemClicked.connect(self.set_saved_vectors)
+
+        clear_all_action = QAction("Clear All Data", self)
+        clear_all_action.triggered.connect(qr.clearAllData)  # Assuming clearAllData is defined in qr.py
+        self.menubar.addAction(clear_all_action)
 
     #------------------ Staring camera ---------------------
         # Begin camera feed
@@ -120,43 +268,92 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
         self.display_saved_images()
 
-    '''def update_frame(self):
-        ret, frame = self.cap.read()
-        if ret:
-            # Process frame with camera parameters
-            processed_frame = qr.process_frame(frame, self.cmtx, self.dist)
-
-            # Apply the return feature if it's active
-            if self.return_feature_on:
-                matched, percentage = qr.returnToLoc(self)
-                self.percentProgressBar = percentage
-
-        self.display_image(processed_frame)'''
-
     def update_frame(self):
         ret, frame = self.cap.read()
         if ret:
             # Process frame with camera parameters
-            processed_frame = qr.process_frame(frame, self.cmtx, self.dist, zoom_factor=self.zoom_factor)
+            processed_frame = qr.process_frame(frame, self.cmtx, self.dist, zoom_factor=self.zoom_factor, return_tvec=qr.saved_tvec, return_rvec=qr.saved_rvec)
 
             # Update current rvec and tvec labels
-            if qr.current_rvec is not None and qr.current_tvec is not None:
+
+            #COMMENTED OUT TO REPLACE ADJUSTMENT INFO INSTAYE DAS IT IS MORE IMPORTANT!!                !!!
+            '''if qr.current_rvec is not None and qr.current_tvec is not None:
                 self.currRvecs.setText(f"Rotation: [{qr.current_rvec[0][0]:.2f}, {qr.current_rvec[1][0]:.2f}, {qr.current_rvec[2][0]:.2f}]")
                 self.currTvecs.setText(f"Translation: [{qr.current_tvec[0][0]:.2f}, {qr.current_tvec[1][0]:.2f}, {qr.current_tvec[2][0]:.2f}]")
             else:
                 self.currRvecs.setText("Rotation: N/A")
-                self.currTvecs.setText("Translation: N/A")
+                self.currTvecs.setText("Translation: N/A")'''
 
             # Apply the return feature if it's active
-            if self.return_feature_on:
+            if self.return_feature_on and self.overlay_on:
+                try:
+                    img_path = os.path.join('savedImages', 'images', self.saved_img_name)
+                    # Only overlay if both return_feature and overlay are active
+                    overlay_image = Image.open(img_path)  # Load the saved QR code image
+                    overlay_image = overlay_image.convert("RGBA") 
+
+                    overlay_image = overlay_image.resize((frame.shape[1], frame.shape[0]), resample=Image.LANCZOS)
+
+                    # Create a Pillow image from the current frame
+                    current_frame_image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)).convert("RGBA")
+
+                    # Blend the current frame with the overlay image
+                    blended_image = Image.blend(current_frame_image, overlay_image, .25)
+
+                    # Convert the blended image back to a format suitable for OpenCV
+                    processed_frame = cv2.cvtColor(np.array(blended_image), cv2.COLOR_RGBA2BGR)
+                    
+                    matched, percentage = qr.returnToLoc(self)
+                    self.percentProgressBar.setValue(int(percentage)) 
+                    if matched:
+                        self.statusLabel.setText("Status: Matched")
+                        self.statusLabel.setStyleSheet("color: green;")
+
+                        #Placing text in regards to the images being matched and no adjustment needed               !!
+                        #self.currRvecs.setText("Rotations adjust: None")
+                        #self.currTvecs.setText("Translation adjust: None")
+
+                    else:
+                        self.statusLabel.setText("Status: Not Matched")
+                        self.statusLabel.setStyleSheet("color: red;")
+
+                        #Placing text in regards to the images being matched and no adjustment needed               !!
+                        rGuide,tGuide = qr.returnGuidance(qr.current_rvec, qr.saved_rvec, qr.current_tvec, qr.saved_tvec)
+                        
+
+                        # Update the adjust text with the guidance
+                        self.currRvecs.setText(f"Rotation adjust: {rGuide}")
+                        self.currTvecs.setText(f"Translation adjust: {tGuide}")
+
+                except FileNotFoundError:
+                    print("ERROR: File not found")
+                    self.overlay_on = False
+                except TypeError:
+                    print("ERROR:  join() type error")
+                    self.overlay_on = False
+            elif self.return_feature_on:
                 matched, percentage = qr.returnToLoc(self)
                 self.percentProgressBar.setValue(int(percentage)) 
                 if matched:
                     self.statusLabel.setText("Status: Matched")
                     self.statusLabel.setStyleSheet("color: green;")
+
+                    #Placing text in regards to the images being matched and no adjustment needed               !!
+                    #self.currRvecs.setText("Rotations adjust: None")
+                    #self.currTvecs.setText("Translation adjust: None")
+
                 else:
                     self.statusLabel.setText("Status: Not Matched")
                     self.statusLabel.setStyleSheet("color: red;")
+
+                    #Placing text in regards to the images being matched and no adjustment needed               !!
+                    rGuide,tGuide = qr.returnGuidance(qr.current_rvec, qr.saved_rvec, qr.current_tvec, qr.saved_tvec)
+                    
+
+                    # Update the adjust text with the guidance
+                    self.currRvecs.setText(f"Rotation adjust: {rGuide}")
+                    self.currTvecs.setText(f"Translation adjust: {tGuide}")
+
 
         self.display_image(processed_frame)
 
@@ -167,39 +364,53 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.cameraFeedLabel.setPixmap(QPixmap.fromImage(out_image))
 
     def display_saved_images(self):
-        #self.listWidget2.clear()
+        self.imgListWidget.clear()
         image_files = [f for f in os.listdir('savedImages/images') if f.endswith('.png')]
 
         # Sort the image files in increaseing order
         image_files_sorted = sorted(image_files, key=lambda x: int(x.split('guiSave')[1].split('.')[0]))
 
         for file in image_files_sorted:
-            self.listWidget2.addItem(file)
+            self.imgListWidget.addItem(file)
 
     def save_image(self):
+        self.imgListWidget.clear()
         ret, frame = self.cap.read()
         if ret:
-            qr.saveImageNLoc(qr.current_rvec, qr.current_tvec, frame)
+            qr.saveImageNLoc(qr.current_rvec, qr.current_tvec, frame, self.zoom_factor)
+            
+        self.display_saved_images()
 
     def toggle_return_feature(self):
         self.return_feature_on = not self.return_feature_on
-        self.display_saved_images()
+        #self.display_saved_images()
         if self.return_feature_on:
+            #self.returning = True
+            qr.returning = True
             self.returnBtn.setText("Return: On")
         else:
+            #self.returning = False
+            qr.returning = False
             self.returnBtn.setText("Return: Off")
-            self.savedRvecs.setText("Rvec: N/A")
-            self.savedTvecs.setText("Tvec: N/A")
+            self.currRvecs.setText("Rotation adjust: None")
+            self.currTvecs.setText("Translation adjust: None")
+            #self.savedRvecs.setText("Rvec: N/A")                   !!!
+            #self.savedTvecs.setText("Tvec: N/A")                   !!!
+
+    def toggle_overlay(self):
+        self.overlay_on = not self.overlay_on
 
     def decrease_zoom(self):
         # Increase zoom factor and update camera feed
-        self.zoom_factor = max(self.zoom_factor - 0.1, 1.0)  
+        self.zoom_factor = max(self.zoom_factor - 0.1, 1.0) 
+        self.zoomlabel.setText(f"Zoom: {self.zoom_factor:.2f}") 
         print(f"Zoom factor: {self.zoom_factor}")
         pass
 
     def increase_zoom(self):
         # Decrease zoom factor and update camera feed
         self.zoom_factor = min(self.zoom_factor + 0.1, 5.0)  
+        self.zoomlabel.setText(f"Zoom: {self.zoom_factor:.2f}.") 
         print(f"Zoom factor: {self.zoom_factor}")
         pass
     
@@ -216,12 +427,15 @@ class MainWindow(QMainWindow, Ui_MainWindow):
     #set display rvec and tvec of saved qr-code if using a list tree to display
     def set_saved_vectors(self, item):
         img_name = item.text()
+        self.saved_img_name = item.text()
         qr.saved_tvec, qr.saved_rvec = qr.getInitialPoints(img_name)
         if qr.saved_tvec is not None and qr.saved_rvec is not None:
             self.savedRvecs.setText(f"Rotation: [{qr.saved_rvec[0][0]:.2f}, {qr.saved_rvec[1][0]:.2f}, {qr.saved_rvec[2][0]:.2f}]")
             self.savedTvecs.setText(f"Translation: [{qr.saved_tvec[0][0]:.2f}, {qr.saved_tvec[1][0]:.2f}, {qr.saved_tvec[2][0]:.2f}]")
         else:
             print("Error: Invalid saved vectors for the selected image.")
+
+    
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)

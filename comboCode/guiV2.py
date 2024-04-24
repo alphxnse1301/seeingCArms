@@ -4,13 +4,72 @@ import platform
 import numpy as np
 from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QLabel, QPushButton, QWidget, QListWidget, QAction
 from PyQt5.QtGui import QImage, QPixmap
-from PyQt5.QtCore import QTimer, Qt, QSize
+from PyQt5.QtCore import QTimer, Qt, QSize, pyqtSignal
 from PyQt5.QtMultimedia import *
 from PyQt5.QtWidgets import *
 import cv2
-import qr
 from PIL import Image, ImageQt
 from designerUI import *
+import qr
+
+
+
+class ImageListItem(QWidget):
+    show_image_signal = pyqtSignal(str)
+
+    def __init__(self, img_name, parent=None):
+        super().__init__(parent)
+        self.layout = QHBoxLayout(self)
+        
+        self.img_name = img_name
+        self.img_label = QLabel(img_name)
+        self.delete_btn = QPushButton("Delete")
+        self.show_btn = QPushButton("Show")
+        
+        self.layout.addWidget(self.img_label)
+        self.layout.addWidget(self.show_btn)
+        self.layout.addWidget(self.delete_btn)
+        
+        self.delete_btn.clicked.connect(self.delete_image)
+        self.show_btn.clicked.connect(lambda: self.show_image_signal.emit(self.img_name))
+
+    def delete_image(self):
+        try:
+            # Delete the image file
+            deletePath = qr.getContinousPath() / 'Images'
+            (deletePath / self.img_name).unlink()
+
+            # Remove the image's data from Data.txt
+            deleteDataPath = qr.getContinousPath() / 'imgData' / 'Data.txt'
+            with open(deleteDataPath, 'r') as file:
+                lines = file.readlines()
+            with open(deleteDataPath, 'w') as file:
+                for line in lines:
+                    if not line.startswith(self.img_name + ':'):
+                        file.write(line)
+
+            mainWindow = self.get_main_window()
+            if mainWindow:
+                mainWindow.display_saved_images()
+        except Exception as e:
+            print(f"Error deleting image or updating list: {e}")
+
+    
+#helper function to call the functions from the main window class 
+    def get_main_window(self):
+        current_widget = self
+        while current_widget is not None:
+            if isinstance(current_widget, MainWindow):
+                return current_widget
+            current_widget = current_widget.parent()
+        return None
+
+    def show_image(self):
+        previewPath = qr.getContinousPath() / 'images'
+        img_path = os.path.join(previewPath, self.img_name)
+        img = Image.open(img_path)
+        cv2.imshow(f'{self.img_name}', img)  # This uses the default image viewer of the system
+
 
 class MainWindow(QMainWindow, Ui_MainWindow):
     def __init__(self):
@@ -21,8 +80,10 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.return_feature_on = False
         self.overlay_on = False
         self.saved_img_name = None
+        self.displayVectors = True
         #self.returning = False
         self.initUI()
+        
 
     def find_realsense_camera(self):
         available_cameras = QCameraInfo.availableCameras()
@@ -101,7 +162,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         '''
 
         #Creation of layout fro frame 1 of horizontal layout
-        self.frameLayout = QVBoxLayout(self.frame)  
+        self.frameLayout = QVBoxLayout(self.frame) 
 
         #setting camera feeds size
         #self.cameraFeedLabel.setFixedSize(640,480)
@@ -141,10 +202,19 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         remove_font.setPointSize(1)
 
         self.currVectorsLabel.setFont(text_font)
-        self.savedVectorsLabel.setFont(remove_font)   #self.savedVectorsLabel.setFont(text_font)          !!!
-        self.savedRvecs.setFont(remove_font)    #self.savedRvecs.setFont(text_font)                       !!!
-        self.savedTvecs.setFont(remove_font)  #self.savedTvecs.setFont(text_font)                         !!!
+        
+
+        if self.displayVectors:
+            self.savedVectorsLabel.setFont(text_font)
+            self.savedRvecs.setFont(text_font) 
+            self.savedTvecs.setFont(text_font)
+        else:
+            self.savedVectorsLabel.setFont(remove_font)
+            self.savedRvecs.setFont(remove_font)
+            self.savedTvecs.setFont(remove_font)
+
         self.currRvecs.setFont(text_font)
+        
         self.currTvecs.setFont(text_font)
 
         self.statusLabel.setFont(text_font)
@@ -161,6 +231,9 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.frame2Layout = QVBoxLayout(self.frame_2)
         self.imgListWidget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)  # Adjusted for expanding
         self.frame2Layout.addWidget(self.imgListWidget)
+
+        self.image_display_label = QLabel()  # Label to display the image
+        self.frame2Layout.addWidget(self.image_display_label)
 
         # This stretch will push the QListWidget to the top
         self.frame2Layout.addStretch(1)
@@ -210,10 +283,14 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
         # Horizontal layout for tracking information labels   
         indicatorLayout = QHBoxLayout()
+        
         indicatorLayout.addWidget(self.currVectorsLabel)
 
-        #commented out for displaying adjustment info               !!!
-        #indicatorLayout.addWidget(self.savedVectorsLabel)
+        if not self.displayVectors:
+            self.currVectorsLabel.setText(f"Camera Adjustments:")
+
+        if self.displayVectors:
+            indicatorLayout.addWidget(self.savedVectorsLabel)
 
         self.frameLayout.addLayout(indicatorLayout)
 
@@ -221,16 +298,16 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         rvecLayout = QHBoxLayout()
         rvecLayout.addWidget(self.currRvecs)
 
-        #commented out for displaying adjustment info               !!!
-        #rvecLayout.addWidget(self.savedRvecs)
+        if self.displayVectors:
+            rvecLayout.addWidget(self.savedRvecs)
 
         self.frameLayout.addLayout(rvecLayout)
 
         tvecLayout = QHBoxLayout()
         tvecLayout.addWidget(self.currTvecs)
 
-        #commented out for displaying adjustment info               !!!
-        #tvecLayout.addWidget(self.savedTvecs)
+        if self.displayVectors:
+            tvecLayout.addWidget(self.savedTvecs)
 
         self.frameLayout.addLayout(tvecLayout)
 
@@ -251,10 +328,18 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
         #set selectability if using a list tree
         self.imgListWidget.itemClicked.connect(self.set_saved_vectors)
+        
 
-        clear_all_action = QAction("Clear All Data", self)
-        clear_all_action.triggered.connect(qr.clearAllData)  # Assuming clearAllData is defined in qr.py
-        self.menubar.addAction(clear_all_action)
+        # Makes a button in the upper toolbar to delete all of the saved images and image data
+        clear_all_Images = QAction("Clear All Data", self)
+        clear_all_Images.triggered.connect(self.clearAllImages)
+        self.menubar.addAction(clear_all_Images)
+
+        #Makes a button in the upper tool bar for turning on the return guidance features or to displayt the tvecs and rvecs of the home and saved images
+        showVectors = QAction("Show Vectors", self)
+        showVectors.triggered.connect(self.toggle_vectors)
+        #commented out as it doesn't work as expected currently
+        #self.menubar.addAction(showVectors)
 
     #------------------ Staring camera ---------------------
         # Begin camera feed
@@ -276,20 +361,21 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
             # Update current rvec and tvec labels
 
-            #COMMENTED OUT TO REPLACE ADJUSTMENT INFO INSTAYE DAS IT IS MORE IMPORTANT!!                !!!
-            '''if qr.current_rvec is not None and qr.current_tvec is not None:
-                self.currRvecs.setText(f"Rotation: [{qr.current_rvec[0][0]:.2f}, {qr.current_rvec[1][0]:.2f}, {qr.current_rvec[2][0]:.2f}]")
-                self.currTvecs.setText(f"Translation: [{qr.current_tvec[0][0]:.2f}, {qr.current_tvec[1][0]:.2f}, {qr.current_tvec[2][0]:.2f}]")
-            else:
-                self.currRvecs.setText("Rotation: N/A")
-                self.currTvecs.setText("Translation: N/A")'''
+            if self.displayVectors:
+                if qr.current_rvec is not None and qr.current_tvec is not None:
+                    self.currRvecs.setText(f"Rotation: [{qr.current_rvec[0][0]:.2f}, {qr.current_rvec[1][0]:.2f}, {qr.current_rvec[2][0]:.2f}]")
+                    self.currTvecs.setText(f"Translation: [{qr.current_tvec[0][0]:.2f}, {qr.current_tvec[1][0]:.2f}, {qr.current_tvec[2][0]:.2f}]")
+                else:
+                    self.currRvecs.setText("Rotation: N/A")
+                    self.currTvecs.setText("Translation: N/A")
 
             # Apply the return feature if it's active
             if self.return_feature_on and self.overlay_on:
                 try:
-                    img_path = os.path.join('savedImages', 'images', self.saved_img_name)
+                    img_path = qr.getContinousPath() / 'Images'
+                    full_path = os.path.join(img_path, self.saved_img_name)
                     # Only overlay if both return_feature and overlay are active
-                    overlay_image = Image.open(img_path)  # Load the saved QR code image
+                    overlay_image = Image.open(full_path)  # Load the saved QR code image
                     overlay_image = overlay_image.convert("RGBA") 
 
                     overlay_image = overlay_image.resize((frame.shape[1], frame.shape[0]), resample=Image.LANCZOS)
@@ -310,20 +396,20 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                         self.statusLabel.setStyleSheet("color: green;")
 
                         #Placing text in regards to the images being matched and no adjustment needed               !!
-                        #self.currRvecs.setText("Rotations adjust: None")
-                        #self.currTvecs.setText("Translation adjust: None")
+                        self.currRvecs.setText("Rotations adjust: None")
+                        self.currTvecs.setText("Translation adjust: None")
 
                     else:
                         self.statusLabel.setText("Status: Not Matched")
                         self.statusLabel.setStyleSheet("color: red;")
 
-                        #Placing text in regards to the images being matched and no adjustment needed               !!
-                        rGuide,tGuide = qr.returnGuidance(qr.current_rvec, qr.saved_rvec, qr.current_tvec, qr.saved_tvec)
+                        if not self.displayVectors:
+                            #Placing text in regards to the images being matched and no adjustment needed               !!
+                            rGuide,tGuide = qr.returnGuidance(qr.current_rvec, qr.saved_rvec, qr.current_tvec, qr.saved_tvec)
                         
-
-                        # Update the adjust text with the guidance
-                        self.currRvecs.setText(f"Rotation adjust: {rGuide}")
-                        self.currTvecs.setText(f"Translation adjust: {tGuide}")
+                            # Update the adjust text with the guidance
+                            self.currRvecs.setText(f"Rotation adjust: {rGuide}")
+                            self.currTvecs.setText(f"Translation adjust: {tGuide}")
 
                 except FileNotFoundError:
                     print("ERROR: File not found")
@@ -347,12 +433,11 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                     self.statusLabel.setStyleSheet("color: red;")
 
                     #Placing text in regards to the images being matched and no adjustment needed               !!
-                    rGuide,tGuide = qr.returnGuidance(qr.current_rvec, qr.saved_rvec, qr.current_tvec, qr.saved_tvec)
-                    
-
-                    # Update the adjust text with the guidance
-                    self.currRvecs.setText(f"Rotation adjust: {rGuide}")
-                    self.currTvecs.setText(f"Translation adjust: {tGuide}")
+                    if qr.saved_rvec is not None and qr.saved_tvec is not None and not self.displayVectors:
+                        rGuide,tGuide = qr.returnGuidance(qr.current_rvec, qr.saved_rvec, qr.current_tvec, qr.saved_tvec)
+                        # Update the adjust text with the guidance
+                        self.currRvecs.setText(f"Rotation adjust: {rGuide}")
+                        self.currTvecs.setText(f"Translation adjust: {tGuide}")
 
 
         self.display_image(processed_frame)
@@ -365,13 +450,20 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
     def display_saved_images(self):
         self.imgListWidget.clear()
-        image_files = [f for f in os.listdir('savedImages/images') if f.endswith('.png')]
-
+        displaySavedPath = qr.getContinousPath() / 'Images'
+        #displayPath = qr.getPath(displaySavedPath)
+        image_files = [f for f in os.listdir(displaySavedPath) if f.endswith('.png') ]
         # Sort the image files in increaseing order
-        image_files_sorted = sorted(image_files, key=lambda x: int(x.split('guiSave')[1].split('.')[0]))
+        image_files_sorted = sorted(image_files, key=lambda x: int(x.split('Image_')[1].split('.')[0]))
 
         for file in image_files_sorted:
-            self.imgListWidget.addItem(file)
+            item = QListWidgetItem(self.imgListWidget)
+            item.setData(Qt.UserRole, file)
+            custom_widget = ImageListItem(file, self.imgListWidget)
+            custom_widget.show_image_signal.connect(self.display_image_in_label)
+            item.setSizeHint(custom_widget.sizeHint())
+            self.imgListWidget.addItem(item)
+            self.imgListWidget.setItemWidget(item, custom_widget)
 
     def save_image(self):
         self.imgListWidget.clear()
@@ -394,11 +486,15 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             self.returnBtn.setText("Return: Off")
             self.currRvecs.setText("Rotation adjust: None")
             self.currTvecs.setText("Translation adjust: None")
-            #self.savedRvecs.setText("Rvec: N/A")                   !!!
-            #self.savedTvecs.setText("Tvec: N/A")                   !!!
+            if self.displayVectors:
+                self.savedRvecs.setText("Rvec: N/A")                  
+                self.savedTvecs.setText("Tvec: N/A")                   
 
     def toggle_overlay(self):
         self.overlay_on = not self.overlay_on
+    
+    def toggle_vectors(self):
+        self.displayVectors = not self.displayVectors
 
     def decrease_zoom(self):
         # Increase zoom factor and update camera feed
@@ -426,15 +522,38 @@ class MainWindow(QMainWindow, Ui_MainWindow):
     #
     #set display rvec and tvec of saved qr-code if using a list tree to display
     def set_saved_vectors(self, item):
-        img_name = item.text()
-        self.saved_img_name = item.text()
-        qr.saved_tvec, qr.saved_rvec = qr.getInitialPoints(img_name)
+        img_name = item.data(Qt.UserRole)
+        self.saved_img_name = img_name
+        print(img_name)
+        qr.saved_tvec, qr.saved_rvec, savedZoom = qr.getInitialPoints(img_name)
         if qr.saved_tvec is not None and qr.saved_rvec is not None:
             self.savedRvecs.setText(f"Rotation: [{qr.saved_rvec[0][0]:.2f}, {qr.saved_rvec[1][0]:.2f}, {qr.saved_rvec[2][0]:.2f}]")
             self.savedTvecs.setText(f"Translation: [{qr.saved_tvec[0][0]:.2f}, {qr.saved_tvec[1][0]:.2f}, {qr.saved_tvec[2][0]:.2f}]")
         else:
             print("Error: Invalid saved vectors for the selected image.")
+    
+    # Whne the clear all data menu action is pressed it will remove all the images and data from the savedImages folder then refresh the image list
+    def clearAllImages(self):
+        qr.clearAllData()
+        self.imgListWidget.clear()
+        self.display_saved_images()
 
+    # Display the specified image in the QLabel (lower right hand side of GUI)
+    def display_image_in_label(self, img_path):
+        adjustLblPath = qr.getContinousPath() / 'Images'
+        full_path = os.path.join(adjustLblPath, img_path)
+        if not os.path.exists(full_path):
+            print(f"Image not found at {full_path}")
+            return
+
+        pixmap = QPixmap(full_path)
+        if pixmap.isNull():
+            print(f"Failed to load image at {full_path}")
+            return
+
+        scaled_pixmap = pixmap.scaled(self.image_display_label.size(), Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+        self.image_display_label.setPixmap(scaled_pixmap)
+        print(f"Image displayed: {img_path}")
     
 
 if __name__ == '__main__':

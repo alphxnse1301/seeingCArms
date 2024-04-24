@@ -5,6 +5,7 @@ import os
 import ast
 import time
 from PIL import Image
+from pathlib import Path
 #import pyrealsense2 as rs
 
 DIFF_CONST = 0.05
@@ -21,36 +22,37 @@ returning = False
 
 savedZoom = None #not implemented currently
 
-
-#=========================================================================================================
-#Function to get the homeImage coords
-def getInitialPoints(imgName):
-    #fname = input('Enter name of Base Image without extension\n>')
-    target_line_prefix = imgName + ':'
-    print("Looking for image data with prefix:", target_line_prefix)
-    #print(imgName)
+""" Get the absolute path to the files for saving images, image data, and ect."""
+def getPath(relative_path):
     
-    with open('savedImages/imgData/Data.txt', 'r') as file:
+    if getattr(sys, 'frozen', False):
+        base_path = Path(sys._MEIPASS)
+    else:
+        base_path = Path(__file__).parent
+    return base_path / relative_path
+#=========================================================================================================
+#Function to get the saved Image coords
+def getInitialPoints(imgName):
+    savedImgPath = getContinousPath() / 'imgData' / 'Data.txt'
+
+    with open(savedImgPath, 'r') as file:
         lines = file.readlines()
         for line in lines:
-            if line.startswith(target_line_prefix):
-                #print('img data found!\n')
+            if line.startswith(imgName + ':'):
                 data_str = line.split(':', 1)[1].strip()
                 try:
                     arrays = ast.literal_eval(data_str)
-                    if len(arrays) == 2:
-                        #found and extracted the arrays
-                        #print("Arrays extracted:", arrays)
+                    if len(arrays) == 3:  # Ensuring a zoom factor is included for the returning imagae
                         tvec = np.array(arrays[0], dtype=float).reshape((3, 1))
                         rvec = np.array(arrays[1], dtype=float).reshape((3, 1))
-                        #savedZoom = np.array(arrays[1], dtype=float)
-                        return tvec, rvec
+                        zoomFactor = arrays[2]
+                        print(f"ZOOM: {zoomFactor}")
+                        return tvec, rvec, zoomFactor
                 except ValueError as e:
                     print("Error parsing data:", e)
-                    return None, None
-    
+                    return None, None, None
     print("Image data not found.")
-    return None, None
+    return None, None, None
 #=========================================================================================================
 
 def rotation_vector_to_matrix(vec):
@@ -92,7 +94,10 @@ def calculate_percentage_difference(saved_tvec, live_tvec, saved_rvec, live_rvec
         return 100
     else:
         # Return the lower of the two percentages to indicate the degree of matching
-        return min(distance_percentage, angle_percentage)
+        #return min(distance_percentage, angle_percentage)
+    
+        # Return the higher of the two percentages to indicate the degree of matching
+        return max(distance_percentage, angle_percentage)
     
 #=========================================================================================================
 
@@ -110,6 +115,9 @@ def returnGuidance(current_rvec, saved_rvec, current_tvec, saved_tvec):
         if abs(diff) > DIFF_CONST:
             direction = rotation_directions[int(diff < 0)]
             rvecGuide = f"Rotate {direction} around the {axis_names[i]} to adjust."
+        else:
+            rvecGuide = "NONE."
+
 
     # Handling translations
     for i, (current, saved) in enumerate(zip( saved_tvec,current_tvec)):
@@ -117,13 +125,15 @@ def returnGuidance(current_rvec, saved_rvec, current_tvec, saved_tvec):
         if abs(diff) > DIFF_CONST:
             index = 2 * i + int(diff < 0)
             tvecGuide = f"Move {move_directions[index]} to adjust along the {axis_names[i]}."
+        else:
+            tvecGuide = "NONE."
 
     return rvecGuide, tvecGuide
 
 
 #=========================================================================================================
-def read_camera_parameters(filepath = 'camera_parameters/intrinsic.dat'):
-
+def read_camera_parameters():
+    filepath = getPath('camera_parameters/intrinsic.dat')
     inf = open(filepath, 'r')
 
     cmtx = []
@@ -145,13 +155,53 @@ def read_camera_parameters(filepath = 'camera_parameters/intrinsic.dat'):
     #cmtx = camera matrix, dist = distortion parameters
     return np.array(cmtx), np.array(dist)
 #=========================================================================================================
+
+def saveImageNLoc( rvecSaved,tvecSaved, img, zoomFactor):
+    # Retrieve the base path for continuous use
+    base_path = getContinousPath()
+
+    # Define the directory path for images
+    images_dir = base_path / 'Images'
+    images_dir.mkdir(exist_ok=True)  # Ensure the directory exists
+
+    # Count existing files to name the new file uniquely
+    count = len([name for name in os.listdir(images_dir) if os.path.isfile(os.path.join(images_dir, name))])
+
+    # Define the save path for the new image
+    image_path = images_dir / f'Image_{count}.png'
+
+    # Save the image using OpenCV
+    cv.imwrite(str(image_path), img)
+
+    # Define the data file path
+    data_file_path = base_path / 'imgData' / 'Data.txt'
+    data_file_path.parent.mkdir(exist_ok=True)  # Ensure the directory exists
+
+    # Prepare the data to be saved
+    saved_data = [tvecSaved.flatten().tolist(), rvecSaved.flatten().tolist(), zoomFactor]  # Flatten and listify the vectors
+
+    # Append the new data to the Data.txt file
+    with open(data_file_path, 'a') as f:
+        f.write(f"Image_{count}.png: {saved_data}\n")
+        print('Data written to file')
+                    
+#=========================================================================================================
 def get_qr_coords(cmtx, dist, points):
 
-    #Selected coordinate points for each corner of QR code.
+    '''Selected coordinate points for each corner of QR code. USE WHEN QR CODE SIZE UNKNOWN, THIS IS FOR UNVERSIAL SIZES OF QRCODES'''
     qr_edges = np.array([[0,0,0],
                          [0,1,0],
                          [1,1,0],
                          [1,0,0]], dtype = 'float32').reshape((4,1,3))
+    
+    '''used WHEN THE SIZE OF A QR CODE IS DEFINITIVELY KNOWN CONVERT YOUR QRCODE SIZE TO METERS I THINK
+    qr_code_size = 0.05715  # 2.25 inches in meters
+    qr_edges = np.array([
+        [-qr_code_size/2, -qr_code_size/2, 0],  # Bottom-left corner
+        [-qr_code_size/2, qr_code_size/2, 0],   # Top-left corner
+        [qr_code_size/2, qr_code_size/2, 0],    # Top-right corner
+        [qr_code_size/2, -qr_code_size/2, 0]    # Bottom-right corner
+    ], dtype='float32').reshape((4, 1, 3))'''
 
     #determine the orientation of QR code coordinate system with respect to camera coorindate system.
     ret, rvec, tvec = cv.solvePnP(qr_edges, points, cmtx, dist)
@@ -167,33 +217,12 @@ def get_qr_coords(cmtx, dist, points):
 
 #=========================================================================================================
     
-def saveImageNLoc( rvecSaved,tvecSaved, img, zoomFactor):
-    dirPath = r'savedImages/images'
-    count = 0
-
-    savedDat = [tvecSaved.flatten().tolist(),rvecSaved.flatten().tolist()] #, zoomFactor]
-
-    for path in os.listdir(dirPath):
-        if os.path.isfile(os.path.join(dirPath, path)):
-            count +=1
-            #print('File count: ', count)
-
-    save_path0 = f'savedImages/images/guiSave{count}.png'
-    cv.imwrite(save_path0, img)
-    #count +=1
-            
-    with open('savedImages/imgData/Data.txt', 'a') as f:
-        f.write("guiSave" + str(count) + ".png: " + str(savedDat) + "\n")
-        print('DAT written to file')
-                    
-#=========================================================================================================
-
 def process_frame(frame, cmtx, dist, update_callback=None, zoom_factor=1.0, return_tvec = None, return_rvec = None):
     global current_rvec, current_tvec
 
-    # Define your desired frame rate (e.g., 30 frames per second)
-    desired_frame_rate = 30
-    frame_duration = 1.0 / desired_frame_rate
+    # Defined frame rate
+    frameRate = 30
+    frame_duration = 1.0 / frameRate
 
     # Start time for frame rate control
     start_time = time.time()
@@ -299,26 +328,31 @@ def enhance_image(frame):
 #=========================================================================================================
 
 def returnToLoc(main_frame):
-    global current_rvec, current_tvec, saved_rvec, saved_tvec
-    if saved_rvec is None or saved_tvec is None or current_rvec is None or current_tvec is None:
-        if saved_rvec is None:
-            print("saved rvec = none")
-        if saved_tvec is None:
-            print("saved tvec = none")
-        if current_rvec is None:
-            print("curr rvec = none")
-        if current_tvec is None:
-            print("curr tvec = none")
-        #print("--MISSING A VALUE--")
+    global current_rvec, current_tvec, saved_rvec, saved_tvec, savedZoom
+
+    if saved_rvec is None or saved_tvec is None:
+        print("Saved data is missing")
         return False, 0
-    #else:
-        #print("\nSAVED rvec: ", saved_rvec, "\nSAVED tvec: ", saved_tvec)
-        #print("\nCURR rvec: ", current_rvec, "\ncurrent tvec: ", current_tvec, "\n")
+    
+    if savedZoom is None:
+        savedZoom = 1.0
+    
+    saved_img_path = getContinousPath() / 'Images' / main_frame.saved_img_name
+    saved_img = cv.imread(str(saved_img_path))
+    if saved_img is not None:
+        # Resize saved_img according to its saved zoom factor
+        if savedZoom != 1.0:
+            height, width = saved_img.shape[:2]
+            new_width = int(width / savedZoom)
+            new_height = int(height / savedZoom)
+            x_offset = (width - new_width) // 2
+            y_offset = (height - new_height) // 2
+            saved_img = saved_img[y_offset:y_offset+new_height, x_offset:x_offset+new_width]
+            saved_img = cv.resize(saved_img, (width, height))
 
     matched = (abs(saved_tvec[0] - current_tvec[0]) <= DIFF_CONST and abs(saved_tvec[1] - current_tvec[1]) <= DIFF_CONST and abs(saved_tvec[2] - current_tvec[2]) <= DIFF_CONST
         and abs(saved_rvec[0] - current_rvec[0]) <= DIFF_CONST and abs(saved_rvec[1] - current_rvec[1]) <= DIFF_CONST and abs(saved_rvec[2] - current_rvec[2]) <= DIFF_CONST)
     
-
     if matched:
         percentage = calculate_percentage_difference(saved_tvec, current_tvec, saved_rvec, current_rvec)
         print("--MATCHED--")
@@ -330,17 +364,37 @@ def returnToLoc(main_frame):
         #main_frame.update_status(False)
         return False, percentage
 #=========================================================================================================
-def clearAllData():  #Doesnt work
-    dirPath = r'savedImages/images/'
+def clearAllData():
+    print("DATA CLEARING...")
+    # Relative path to the directory containing images
+    dirPath = getContinousPath() / 'Images'
 
+    # Remove all .png files in the directory
     for file in os.listdir(dirPath):
         if file.endswith('.png'):
-            os.remove(file) 
-            
+            fullPath = os.path.join(dirPath, file)  # Get the full path of the file
+            os.remove(fullPath)  # Remove the file using the full path
+
+    # Clear the contents of the data file
+    dataFilePath = getContinousPath() / 'imgData'/'Data.txt'
+    dataFilePath = dataFilePath
+    with open(dataFilePath, 'w') as f:
+        f.write('')  # Opening in 'w' mode and writing an empty string to truncate the file can also be doen using f.truncate()
+
+#=========================================================================================================
+
+#used for the the clickable app icon, so that the data can be used throguh many sessions
+def getContinousPath():
+    home = Path.home()
+    path = home / 'savedImages'
+    images_path = path / 'Images'
+    img_data_path = path / 'imgData'
     
-    with open('savedImages/imgData/Data.txt', 'w') as f:
-        #f.truncate()
-        pass
+    for p in [path, images_path, img_data_path]:
+        if not p.exists():
+            p.mkdir(parents=True)
+    
+    return path
 #=========================================================================================================
                     
 def show_axes(cmtx, dist, in_source):
@@ -477,7 +531,7 @@ if __name__ == '__main__':
     #read camera intrinsic parameters.
     cmtx, dist = read_camera_parameters()
 
-    input_source = 'media/test.mp4'
+    input_source = getPath('media/test.mp4')
     if len(sys.argv) > 1:
         input_source = int(sys.argv[1])
 

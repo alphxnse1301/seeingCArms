@@ -2,7 +2,7 @@
 
 By: Alphonse Crittenden, Toby Mclenon, Hunter Holbrook, Hailey Faith, Turner Zishka, and Kyle Fiske
 
-This tool aims to enhance the effiency of procedures where X-Rays are needed, specifically floroscopy devices that are manually operated and do not offer assistance in returning to a specific location.
+This tool aims to enhance the efficiency of procedures where X-Rays are needed, specifically fluoroscopy devices that are manually operated and do not offer assistance in returning to a specific location.
  - This project is made to work specifically with the Intel RealSense D435F!
 
 ## Application Installation

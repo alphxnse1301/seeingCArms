@@ -11,5 +11,5 @@ This tool aims to enhance the effiency of procedures where X-Rays are needed, sp
  - Select 'Download' from the Raw file options
 
 ## To View Code
-- CLick the 'comboCode' folder
+- Click the 'comboCode' folder
 - View qr.py, guiV2.py, and DesignerUI.py

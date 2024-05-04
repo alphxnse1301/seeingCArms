@@ -94,6 +94,11 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             if "Intel(R) RealSense(TM) Depth Camera 435 with RGB Module RGB" in camera.description():
                 print("CAMERA FOUND: ", i)
                 return i
+            else:
+                bundle_dir = os.path.abspath(os.path.dirname('media')) 
+                adjustLblPath = os.path.join(bundle_dir, 'test.mp4')
+                
+                return adjustLblPath
         return -1
     
     def initUI(self):
@@ -190,9 +195,14 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.incZoomBtn.setFont(button_font)
         self.decZoomBtn.setFont(button_font)
 
-        #creat text to display current zoom factor
+        #create text to display current zoom factor
         self.zoomlabel = QLabel('Zoom: 1.0', self)
         self.zoomlabel.setFont(self.saveBtn.font() )
+
+        #create text to display saved zoom factor
+        self.savedZoomLabel = QLabel('Saved Zoom: N/A', self)
+        self.savedZoomLabel.setFont(self.saveBtn.font())
+        
 
         #setting saved and curr qr code text size
         text_font = self.saveBtn.font() 
@@ -259,8 +269,9 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
         zoomLayout0 = QHBoxLayout()
         zoomLayout0.addWidget(self.zoomlabel)
-
+        zoomLayout0.addWidget(self.savedZoomLabel)
         self.frameLayout.addLayout(zoomLayout0)
+
         # Image zoom button layout
         zoomLayout = QHBoxLayout()
         zoomLayout.addWidget(self.incZoomBtn)
@@ -403,13 +414,13 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                         self.statusLabel.setText("Status: Not Matched")
                         self.statusLabel.setStyleSheet("color: red;")
 
-                        if not self.displayVectors:
+                        '''if not self.displayVectors:
                             #Placing text in regards to the images being matched and no adjustment needed               !!
                             rGuide,tGuide = qr.returnGuidance(qr.current_rvec, qr.saved_rvec, qr.current_tvec, qr.saved_tvec)
                         
                             # Update the adjust text with the guidance
                             self.currRvecs.setText(f"Rotation adjust: {rGuide}")
-                            self.currTvecs.setText(f"Translation adjust: {tGuide}")
+                            self.currTvecs.setText(f"Translation adjust: {tGuide}")'''
 
                 except FileNotFoundError:
                     print("ERROR: File not found")
@@ -433,11 +444,11 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                     self.statusLabel.setStyleSheet("color: red;")
 
                     #Placing text in regards to the images being matched and no adjustment needed               !!
-                    if qr.saved_rvec is not None and qr.saved_tvec is not None and not self.displayVectors:
+                    '''if qr.saved_rvec is not None and qr.saved_tvec is not None and not self.displayVectors:
                         rGuide,tGuide = qr.returnGuidance(qr.current_rvec, qr.saved_rvec, qr.current_tvec, qr.saved_tvec)
                         # Update the adjust text with the guidance
                         self.currRvecs.setText(f"Rotation adjust: {rGuide}")
-                        self.currTvecs.setText(f"Translation adjust: {tGuide}")
+                        self.currTvecs.setText(f"Translation adjust: {tGuide}")'''
 
 
         self.display_image(processed_frame)
@@ -480,6 +491,19 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             #self.returning = True
             qr.returning = True
             self.returnBtn.setText("Return: On")
+            if self.saved_img_name is None:
+            # No image is selected, select the latest image
+                displaySavedPath = qr.getContinousPath() / 'Images'
+                image_files = [f for f in os.listdir(displaySavedPath) if f.endswith('.png')]
+                if image_files:
+                    latest_image = sorted(image_files, key=lambda x: int(x.split('Image_')[1].split('.')[0]))[-1]
+                    self.saved_img_name = latest_image
+                    qr.saved_tvec, qr.saved_rvec, savedZoom = qr.getInitialPoints(latest_image)
+                    # Update UI text for saved vectors
+                    if qr.saved_tvec is not None and qr.saved_rvec is not None and self.displayVectors :
+                        self.savedRvecs.setText(f"Rotation: [{qr.saved_rvec[0][0]:.2f}, {qr.saved_rvec[1][0]:.2f}, {qr.saved_rvec[2][0]:.2f}]")
+                        self.savedTvecs.setText(f"Translation: [{qr.saved_tvec[0][0]:.2f}, {qr.saved_tvec[1][0]:.2f}, {qr.saved_tvec[2][0]:.2f}]")
+                        self.savedZoomLabel.setText(f"Saved Zoom: {savedZoom:.1f}")
         else:
             #self.returning = False
             qr.returning = False
@@ -488,7 +512,8 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             self.currTvecs.setText("Translation adjust: None")
             if self.displayVectors:
                 self.savedRvecs.setText("Rvec: N/A")                  
-                self.savedTvecs.setText("Tvec: N/A")                   
+                self.savedTvecs.setText("Tvec: N/A") 
+                #self.savedZoomLabel.setText(f"Saved Zoom: {savedZoom:.1f}")                  
 
     def toggle_overlay(self):
         self.overlay_on = not self.overlay_on
@@ -529,8 +554,10 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         if qr.saved_tvec is not None and qr.saved_rvec is not None:
             self.savedRvecs.setText(f"Rotation: [{qr.saved_rvec[0][0]:.2f}, {qr.saved_rvec[1][0]:.2f}, {qr.saved_rvec[2][0]:.2f}]")
             self.savedTvecs.setText(f"Translation: [{qr.saved_tvec[0][0]:.2f}, {qr.saved_tvec[1][0]:.2f}, {qr.saved_tvec[2][0]:.2f}]")
+            self.savedZoomLabel.setText(f"Saved Zoom: {savedZoom:.1f}")
         else:
             print("Error: Invalid saved vectors for the selected image.")
+            self.savedZoomLabel.setText("Saved Zoom: N/A")
     
     # Whne the clear all data menu action is pressed it will remove all the images and data from the savedImages folder then refresh the image list
     def clearAllImages(self):

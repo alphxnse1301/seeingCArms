@@ -22,7 +22,10 @@ returning = False
 
 savedZoom = None #not implemented currently
 
-""" Get the absolute path to the files for saving images, image data, and ect."""
+""" Gets an absolute path from a relative path, useful for file operations, especially in a frozen Python application.
+
+ Not sure about the meipass but it was said to be needed when bundling the application for PyInstaller
+ """
 def getPath(relative_path):
     
     if getattr(sys, 'frozen', False):
@@ -30,8 +33,12 @@ def getPath(relative_path):
     else:
         base_path = Path(__file__).parent
     return base_path / relative_path
-#=========================================================================================================
-#Function to get the saved Image coords
+
+
+'''
+This function will parse the data file that all of the saved qr-codes are saved to by locating the "image name" at the begining
+of a line then storing the values of each array into the needed variables for the rvec, tvec, adn the zoom otherwise return none if it is not found
+'''
 def getInitialPoints(imgName):
     savedImgPath = getContinousPath() / 'imgData' / 'Data.txt'
 
@@ -53,8 +60,10 @@ def getInitialPoints(imgName):
                     return None, None, None
     print("Image data not found.")
     return None, None, None
-#=========================================================================================================
 
+'''
+Predifened function for converting rotational vectors to a rotational matrix for futher computation
+'''
 def rotation_vector_to_matrix(vec):
     if vec is None:
         print("Error: rotation vector is None")
@@ -68,7 +77,13 @@ def rotation_vector_to_matrix(vec):
     except Exception as e:
         print(f"Error in Rodrigues conversion: {e}")
         return None
-#=========================================================================================================
+
+'''
+Tracing: multiplying one rotation matrix by the transpose of the other, derives the angle of rotation that relates the two rotation matrices
+
+- typically used in robotics, found this method while reading through robotic forums
+
+'''
 def angular_difference(vec1, vec2):
     R1 = rotation_vector_to_matrix(vec1)
     R2 = rotation_vector_to_matrix(vec2)
@@ -79,8 +94,14 @@ def angular_difference(vec1, vec2):
     trace = np.trace(R_diff)
     angle = np.arccos((trace - 1) / 2.0)
     return np.degrees(angle)
-#=========================================================================================================
 
+
+'''
+Calculates the percentage differences in position and rotation between saved and current states based on a predefined threshold (DIFF_CONST), which helps in determining how "off"
+the current state is from a saved qr code location.
+
+uses euclidean distance for the tvec then using a trace calculation after converting the rvecs into a matrix
+'''
 def calculate_percentage_difference(saved_tvec, live_tvec, saved_rvec, live_rvec, threshold=DIFF_CONST):
     distance_diff = np.linalg.norm(saved_tvec - live_tvec)
     angle_diff = angular_difference(saved_rvec, live_rvec)
@@ -97,9 +118,18 @@ def calculate_percentage_difference(saved_tvec, live_tvec, saved_rvec, live_rvec
         #return min(distance_percentage, angle_percentage)
     
         # Return the higher of the two percentages to indicate the degree of matching
-        return max(distance_percentage, angle_percentage)
+        #return max(distance_percentage, angle_percentage)
+
+        # Retuens the average of the 2 values so that 100% will be returned only if both values are 100% matched
+        return ((distance_percentage, angle_percentage)/2)
     
-#=========================================================================================================
+''' 
+
+text guidance on how to adjust the camera to match a previously saved state, based on current and saved transformation vectors.
+
+- Not the best/most intuitive to inform a user as the recomendations are updating to fast and and does not give a measurment of how much adjustment is needed
+
+'''
 
 def returnGuidance(current_rvec, saved_rvec, current_tvec, saved_tvec):
     rvecGuide = "No rotation adjustment needed."
@@ -131,7 +161,11 @@ def returnGuidance(current_rvec, saved_rvec, current_tvec, saved_tvec):
     return rvecGuide, tvecGuide
 
 
-#=========================================================================================================
+'''
+Reads camera intrinsic parameters from a file, needed for accurate 3D calculations in computer vision.
+
+predfined from source
+'''
 def read_camera_parameters():
     filepath = getPath('camera_parameters/intrinsic.dat')
     inf = open(filepath, 'r')
@@ -154,8 +188,9 @@ def read_camera_parameters():
 
     #cmtx = camera matrix, dist = distortion parameters
     return np.array(cmtx), np.array(dist)
-#=========================================================================================================
-
+'''
+Takes the known values(rvec, tvec, imag) and saves them in there appropriate files to retreive for later opertions
+'''
 def saveImageNLoc( rvecSaved,tvecSaved, img, zoomFactor):
     # Retrieve the base path for continuous use
     base_path = getContinousPath()
@@ -169,6 +204,18 @@ def saveImageNLoc( rvecSaved,tvecSaved, img, zoomFactor):
 
     # Define the save path for the new image
     image_path = images_dir / f'Image_{count}.png'
+
+    # makes the image being saved the same scale as it was saved at, needed for returning as the coordinates are relative to the specific camera field
+    if zoomFactor > 1.0:
+        height, width = img.shape[:2]
+        new_width = int(width / zoomFactor)
+        new_height = int(height / zoomFactor)
+        x_offset = (width - new_width) // 2
+        y_offset = (height - new_height) // 2
+
+        img = img[y_offset:y_offset+new_height, x_offset:x_offset+new_width]
+        
+        img = cv.resize(img, (width, height))
 
     # Save the image using OpenCV
     cv.imwrite(str(image_path), img)
@@ -185,7 +232,9 @@ def saveImageNLoc( rvecSaved,tvecSaved, img, zoomFactor):
         f.write(f"Image_{count}.png: {saved_data}\n")
         print('Data written to file')
                     
-#=========================================================================================================
+'''
+Determines the orientation and position of a QR code within a camera's view using its intrinsic parameters and a detected QR-codes corner points
+'''
 def get_qr_coords(cmtx, dist, points):
 
     '''Selected coordinate points for each corner of QR code. USE WHEN QR CODE SIZE UNKNOWN, THIS IS FOR UNVERSIAL SIZES OF QRCODES'''
@@ -194,7 +243,7 @@ def get_qr_coords(cmtx, dist, points):
                          [1,1,0],
                          [1,0,0]], dtype = 'float32').reshape((4,1,3))
     
-    '''used WHEN THE SIZE OF A QR CODE IS DEFINITIVELY KNOWN CONVERT YOUR QRCODE SIZE TO METERS I THINK
+    '''used WHEN THE SIZE OF A QR CODE IS DEFINITIVELY KNOWN CONVERT YOUR QRCODE SIZE TO METERS
     qr_code_size = 0.05715  # 2.25 inches in meters
     qr_edges = np.array([
         [-qr_code_size/2, -qr_code_size/2, 0],  # Bottom-left corner
@@ -215,7 +264,10 @@ def get_qr_coords(cmtx, dist, points):
     #return empty arrays if rotation and translation values not found
     else: return [], [], []
 
-#=========================================================================================================
+'''
+Processes each frame of video to detect QR codes, extract their positions and orientations, and optionally adjust the display based
+on zoom levels or target return vectors. Manages frame rate by calculating and controlling the time spent processing each frame.
+ '''
     
 def process_frame(frame, cmtx, dist, update_callback=None, zoom_factor=1.0, return_tvec = None, return_rvec = None):
     global current_rvec, current_tvec
@@ -236,10 +288,9 @@ def process_frame(frame, cmtx, dist, update_callback=None, zoom_factor=1.0, retu
         y_offset = (height - new_height) // 2
 
         frame = frame[y_offset:y_offset+new_height, x_offset:x_offset+new_width]
-        if zoom_factor > 2.0:
-            frame = cv.resize(frame, (width, height))#, interpolation=cv.INTER_LINEAR)
-        else:
-            frame = cv.resize(frame, (width, height))
+        
+        frame = cv.resize(frame, (width, height))
+        
 
         #frame = enhance_image(frame)
 
@@ -249,9 +300,26 @@ def process_frame(frame, cmtx, dist, update_callback=None, zoom_factor=1.0, retu
     if ret_qr:
         axis_points, rvec, tvec = get_qr_coords(cmtx, dist, points)
 
+        #attempt at adding a filter to the rvec and tvec values to smooth the trasitions relayed to the user  @ turnerZ
+        #diffR = (rvec -current_rvec)
+        #diffT = (tvec -current_tvec)
+        
+        #diffHistT = diffHistT + diffT
+        #diffHistR = diffHistR + diffR
+
+
+        #filterRVec = current_rvec + 0.25*diffR + 0.02*diffHistR
+        #filterTvec = current_tvec + 0.25*diffT + 0.02*diffHistT
+
+        #if a qr code is found in the camera feed, we note the the origin to be the middle most box then used that point 
+        # to place am axis. THe commented ou areas are different type of axis that can be placed with there description above.
+
         if len(axis_points) > 0:
             axis_points = axis_points.reshape((4, 2))
             origin = (int(axis_points[0][0]), int(axis_points[0][1]))
+            #current_rvec = filterRVec
+            #current_tvec = filterTvec
+
             current_rvec = rvec
             current_tvec = tvec
 
@@ -320,13 +388,18 @@ def process_frame(frame, cmtx, dist, update_callback=None, zoom_factor=1.0, retu
 
     return frame
 
+'''
+attempt at making the images easier to detect a qr code when the zoom feature is on but started to see a decline at a certain point.
+'''
 def enhance_image(frame):
     # Apply sharpening filter
     kernel = np.array([[-1, -1, -1], [-1, 9, -1], [-1, -1, -1]])
     sharpened_frame = cv.filter2D(frame, -1, kernel)
     return sharpened_frame
-#=========================================================================================================
 
+'''
+Determine the meseaure of diff in the current and saved vectors to relay if the points are matched or not (the measures are within our defined DIFF_CONST)
+'''
 def returnToLoc(main_frame):
     global current_rvec, current_tvec, saved_rvec, saved_tvec, savedZoom
 
@@ -340,6 +413,7 @@ def returnToLoc(main_frame):
     saved_img_path = getContinousPath() / 'Images' / main_frame.saved_img_name
     saved_img = cv.imread(str(saved_img_path))
     if saved_img is not None:
+
         # Resize saved_img according to its saved zoom factor
         if savedZoom != 1.0:
             height, width = saved_img.shape[:2]
@@ -363,7 +437,10 @@ def returnToLoc(main_frame):
         print("--NOT MATCHED--")
         #main_frame.update_status(False)
         return False, percentage
-#=========================================================================================================
+
+'''
+Removes all the files in the created base folder of the application and removes all values from the vector saving txt file
+'''
 def clearAllData():
     print("DATA CLEARING...")
     # Relative path to the directory containing images
@@ -381,9 +458,10 @@ def clearAllData():
     with open(dataFilePath, 'w') as f:
         f.write('')  # Opening in 'w' mode and writing an empty string to truncate the file can also be doen using f.truncate()
 
-#=========================================================================================================
-
-#used for the the clickable app icon, so that the data can be used throguh many sessions
+'''
+used for the the clickable app icon, so that the data can be used throguh many sessions
+'''
+#
 def getContinousPath():
     home = Path.home()
     path = home / 'savedImages'
@@ -395,8 +473,10 @@ def getContinousPath():
             p.mkdir(parents=True)
     
     return path
-#=========================================================================================================
-                    
+
+'''
+Main loop for a real-time video feed that detects QR codes and displays their axes on the video. It also handles user interactions for saving states and attempting to return to them
+'''                 
 def show_axes(cmtx, dist, in_source):
     cap = cv.VideoCapture(in_source)
 
